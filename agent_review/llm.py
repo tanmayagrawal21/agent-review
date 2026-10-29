@@ -77,6 +77,8 @@ def call(cfg: dict, key: str, system: str, user: str, schema: dict, opener=_open
             d = _post(base.removesuffix("/v1") + "/v1/messages", {"model": cfg["model"], "max_tokens": 8192,
                                               "system": system, "messages": [{"role": "user", "content": asked}]},
                       {"x-api-key": key, "anthropic-version": "2023-06-01"}, opener, timeout)
+            if d.get("stop_reason") == "max_tokens":  # a cut-off reply is never an answer
+                return {"structured": None, "tokens": tokens(d.get("usage")), "error": "reply truncated"}
             text = "".join(b.get("text", "") for b in d.get("content") or [] if isinstance(b, dict))
             return {"structured": extract(text), "tokens": tokens(d.get("usage")), "error": None}
         code = None
@@ -94,6 +96,8 @@ def call(cfg: dict, key: str, system: str, user: str, schema: dict, opener=_open
                 if e.code in UNSUPPORTED:
                     continue  # try a simpler response format
                 raise
+            if d["choices"][0].get("finish_reason") == "length":  # a cut-off reply is never an answer
+                return {"structured": None, "tokens": tokens(d.get("usage")), "error": "reply truncated"}
             text = str(d["choices"][0]["message"]["content"] or "")
             return {"structured": extract(text), "tokens": tokens(d.get("usage")), "error": None}
         return {"structured": None, "tokens": tokens({}), "error": f"HTTP {code} from the model endpoint"}

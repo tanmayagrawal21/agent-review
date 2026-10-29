@@ -109,3 +109,12 @@ def test_an_example_verdict_or_echoed_schema_never_wins():
     assert extract(same)["summary"] == "s"  # the last top-level object wins
     schema = json.dumps({"type": "object", "properties": {"verdict": {"type": "string"}}})
     assert extract(schema + "\n" + real)["verdict"] == "changes"  # nested schema "verdict" is not an answer
+
+
+def test_a_truncated_reply_is_an_error_not_an_answer():
+    cut = 'Example: {"verdict": "approve"}\n{"verdict": "changes", "summ'
+    o, _ = opener({"choices": [{"message": {"content": cut}, "finish_reason": "length"}]})
+    assert review.run("reviewer", BUNDLE, "k", o)["error"] == "reply truncated"
+    o, _ = opener({"content": [{"type": "text", "text": cut}], "stop_reason": "max_tokens"})
+    b = {**BUNDLE, "config": {**BUNDLE["config"], "base_url": "https://api.anthropic.com"}}
+    assert review.run("reviewer", b, "k", o)["error"] == "reply truncated"
