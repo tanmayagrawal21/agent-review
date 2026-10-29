@@ -118,7 +118,7 @@ def process(items: list[tuple[str, str]], run=run_model) -> tuple[list[str], lis
     {"secrets": [names], "labels": [reportable Rampart labels]}."""
     lines, found = [], []
     for _, text in items:
-        hit = {"secrets": [], "labels": []}
+        hit = {"secrets": [], "labels": [], "spans": []}
         for name, pat in SECRETS:
             if pat.search(text):
                 hit["secrets"].append(name)
@@ -137,14 +137,29 @@ def process(items: list[tuple[str, str]], run=run_model) -> tuple[list[str], lis
                 groups[-1][1], groups[-1][2] = b, groups[-1][2] + [lb]
             else:
                 groups.append([a, b, [lb]])
-        found[i]["labels"] += [lb for a, b, lbs in groups if reportable(items[i][0], original[i], x + a, x + b)
-                               and not FICTIONAL.fullmatch(orig[a:b].strip()) for lb in lbs]
+        kept = [(a, b, lbs) for a, b, lbs in groups if reportable(items[i][0], original[i], x + a, x + b)
+                and not FICTIONAL.fullmatch(orig[a:b].strip())]
+        found[i]["labels"] += [lb for _, _, lbs in kept for lb in lbs]
+        found[i]["spans"] += [(x + a, x + b, lbs) for a, b, lbs in kept]
+        found[i]["line"] = original[i]  # secrets already masked as [SECRET]; personal data is not
         lines[i] = lines[i][:x] + new.replace("\n", " ") + lines[i][y:]  # right to left keeps offsets valid
     return lines, found
 
 
+def highlight(line: str, spans: list[tuple[int, int, list[str]]]) -> str:
+    """The line with a caret underline under each detection, labelled, as a code block."""
+    marks = [" "] * len(line)
+    for a, b, _ in spans:
+        for k in range(a, min(b, len(line))):
+            marks[k] = "^"
+    names = ", ".join(sorted({REVIEW.get(lb, lb.lower().replace("_", " ")) for _, _, lbs in spans for lb in lbs}))
+    return f"\n```\n{line}\n{''.join(marks).rstrip()} {names}\n```"
+
+
 def findings(file: str, line: int, hit: dict) -> list[dict]:
-    """What the local scan reports for one added line."""
+    """What the local scan reports for one added line. Personal data is highlighted in place on the line;
+    secrets stay masked as [SECRET]."""
+    shown = highlight(hit["line"], hit["spans"]) if hit.get("spans") and hit.get("line") is not None else ""
     out = [{"file": file, "line": line, "severity": "blocking", "category": name,
             "message": f"Looks like a {name} in a real provider format. Remove it, rotate it if it was ever real, "
                        "and load it from a secret store; use an obviously fake value in tests."}
@@ -152,13 +167,13 @@ def findings(file: str, line: int, hit: dict) -> list[dict]:
     hard = sorted({lb for lb in hit["labels"] if lb in BLOCKING} - ({"CREDIT_CARD"} if hit["secrets"] else set()))
     soft = sorted({REVIEW[lb] for lb in hit["labels"] if lb in REVIEW})
     if hard:
-        out.append({"file": file, "line": line, "severity": "blocking", "category": "personal data",
-                    "message": f"Looks like {', '.join(h.lower().replace('_', ' ') for h in hard)}. Remove it or use "
-                               "an obviously fictional value."})
+        out.append({"file": file, "line": line, "severity": "blocking", "category": "potential PII",
+                    "message": f"Rampart detected {', '.join(h.lower().replace('_', ' ') for h in hard)}. Remove it or "
+                               f"use an obviously fictional value.{shown}"})
     elif soft:
-        out.append({"file": file, "line": line, "severity": "suggestion", "category": "personal data",
-                    "message": f"Possible real {', '.join(soft)}. Check it is not real personal data; use an obviously "
-                               "fictional value (Jane Doe, jane@example.com, 555-0100) if it is."})
+        out.append({"file": file, "line": line, "severity": "suggestion", "category": "potential PII",
+                    "message": f"Rampart detected a possible {', '.join(soft)}. Check it is not real; if it is, use an "
+                               f"obviously fictional value (Jane Doe, jane@example.com, 555-0100).{shown}"})
     return out
 
 

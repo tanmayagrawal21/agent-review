@@ -46,7 +46,7 @@ def test_bundle_is_redacted_and_carries_the_local_findings(repo):
         assert raw not in text, raw
     assert "[SECRET]" in b["files"]["app.py"] and b["redacted"] is True
     cats = sorted({(f["line"], f["category"]) for f in b["local_findings"] if f["file"] == "app.py"})
-    assert (1, "personal data") in cats and (2, "personal data") in cats and (3, "GitHub token") in cats
+    assert (1, "potential PII") in cats and (2, "potential PII") in cats and (3, "GitHub token") in cats
     assert [f["severity"] for f in b["local_findings"] if f["line"] == 2] == ["blocking"]  # SSN blocks
     assert b["config"]["model"] == "m" and "key" not in json.dumps(b["config"]).lower()
 

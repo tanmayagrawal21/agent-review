@@ -7,7 +7,7 @@ model provider. Every text is redacted locally, on the runner, before a model se
 |---|---|
 | **Reviewer** | correctness, behaviour, compatibility, tests |
 | **Safety** | controls a change could loosen or make fail open: auth, permissions, limits, validation |
-| **Privacy** | secrets and personal data: [Rampart](https://huggingface.co/nationaldesignstudio/rampart) (on-device PII model) and secret patterns, plus a model pass for what they missed |
+| **Privacy** | personal data, found by [Rampart](https://huggingface.co/nationaldesignstudio/rampart) (an on-device PII model) and highlighted on each line, plus a model pass for other privacy risks: unusual secrets, data exposed at runtime, names in file paths |
 
 ```
 prepare (checkout, redact locally) ─► bundle.json ─┬─ reviewer ─┐
@@ -52,6 +52,8 @@ agents off, scope them to paths, make the check blocking, or give the agents not
 - Pull requests from forks get no secrets and a read-only token, so only the local privacy scan runs, and its
   result appears in the workflow run's summary rather than on the PR.
 - File names are not redacted. Keep personal data out of paths.
+- Rampart is a small model: its PII detections can be wrong in both directions. Treat them as prompts to
+  check, not verdicts.
 
 How it works, with diagrams and the trust model: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

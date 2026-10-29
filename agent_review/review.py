@@ -18,7 +18,7 @@ PROMPTS = Path(__file__).resolve().parent / "prompts"
 BASE_URL_ENV, MODEL_ENV = "AGENT_REVIEW_BASE_URL", "AGENT_REVIEW_MODEL"
 LANES = {
     "reviewer": "correctness, behaviour, compatibility and tests",
-    "privacy": "secrets, credentials and personal data in the change, or exposed by it at runtime",
+    "privacy": "secrets, personal data (Rampart reports it locally) and anything that exposes either at runtime",
     "safety": "controls (auth, permissions, approvals, limits, validation at trust boundaries, fail-open), "
               "including bugs that weaken a control",
 }

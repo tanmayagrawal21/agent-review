@@ -45,7 +45,7 @@ def test_secrets_are_redacted_before_the_model_sees_the_line():
 
 def test_findings_policy():
     f = pii.findings("a.py", 3, {"secrets": [], "labels": ["SSN", "GIVEN_NAME"]})
-    assert [(x["severity"], x["category"]) for x in f] == [("blocking", "personal data")]
+    assert [(x["severity"], x["category"]) for x in f] == [("blocking", "potential PII")]
     soft = pii.findings("a.py", 1, {"secrets": [], "labels": ["EMAIL", "URL"]})
     assert [x["severity"] for x in soft] == ["suggestion"]
     card = pii.findings("a.py", 1, {"secrets": ["Stripe secret key"], "labels": ["CREDIT_CARD"]})
@@ -102,3 +102,10 @@ def test_fictional_values_are_not_reported_and_source_placeholders_are_ignored()
         return [(t.replace("Jane Doe", "[GIVEN_NAME_1]"), ["GIVEN_NAME"] if "Jane Doe" in t else []) for t in texts]
     _, found = pii.process([("t.py", 'u = "Jane Doe"'), ("t.py", 'x = "[SSN_1]"')], tag)
     assert found[0]["labels"] == [] and found[1]["labels"] == []
+
+
+def test_findings_highlight_the_detected_text_in_place():
+    lines, found = pii.process([("a.py", 'OWNER = "Priya Ramanathan"  # see ghp_' + "a" * 36)], model)
+    msg = pii.findings("a.py", 1, found[0])[-1]["message"]
+    assert 'OWNER = "Priya Ramanathan"  # see [SECRET]' in msg  # PII shown and underlined, secret still masked
+    assert "^^^^^^^^^^^^^^^^ name" in msg and "ghp_" not in msg

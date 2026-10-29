@@ -96,3 +96,15 @@ def test_agents_that_could_not_run_are_shown_not_hidden(tmp_path):
     assert rs["privacy"]["status"] == "ok" and "No model pass: diff is 194363" in rs["privacy"]["summary"]
     review, failed = build(list(rs.values()), b)
     assert failed and review["body"].count("Not approved.") == 2
+
+
+def test_privacy_section_counts_rampart_pii_and_keeps_other_concerns(tmp_path):
+    local = [{"file": "a.py", "line": 2, "severity": "suggestion", "category": "potential PII", "message": "m"},
+             {"file": "a.py", "line": 2, "severity": "suggestion", "category": "potential PII", "message": "m"}]
+    write(tmp_path, "privacy", summary="Logs the full request body.")
+    rs = {r["agent"]: r for r in results({**BUNDLE, "local_findings": local}, tmp_path)}
+    s = rs["privacy"]["summary"]
+    assert s.startswith("**2 potential PII detected** by Rampart") and "may not be accurate" in s
+    assert "Other privacy concerns: Logs the full request body." in s
+    review, _ = build(list(rs.values()), {**BUNDLE, "local_findings": local})
+    assert sum("potential PII" in c["body"] for c in review["comments"]) == 1  # identical findings posted once
