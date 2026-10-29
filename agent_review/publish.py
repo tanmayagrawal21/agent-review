@@ -39,7 +39,7 @@ def results(bundle: dict, findings_dir: Path) -> list[dict]:
         out.append(r)
     why = bundle.get("notice") or "could not run"
     for agent in bundle.get("gap") or []:  # enabled but not run (too large, no key): a visible row, not approved
-        if agent not in bundle["agents"]:
+        if agent not in bundle["agents"] and not (agent == "privacy" and bundle.get("privacy")):
             out.append({"agent": agent, "status": "error", "verdict": None, "summary": "", "findings": [],
                         "tokens": ZERO, "error": f"not reviewed: {why}"})
     if bundle.get("privacy"):

@@ -31,7 +31,7 @@ def test_results_reject_forged_and_stale_and_merge_privacy(tmp_path):
 
 def test_keyless_privacy_is_local_only(tmp_path):
     rs = results({**BUNDLE, "agents": []}, tmp_path)
-    assert [r["agent"] for r in rs] == ["privacy"] and rs[0]["status"] == "ok" and "no key" in rs[0]["summary"]
+    assert [r["agent"] for r in rs] == ["privacy"] and rs[0]["status"] == "ok" and "No model pass" in rs[0]["summary"]
 
 
 def test_anchor_and_one_review():
