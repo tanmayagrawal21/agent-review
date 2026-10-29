@@ -31,7 +31,7 @@ def test_results_reject_forged_and_stale_and_merge_privacy(tmp_path):
 
 def test_keyless_privacy_is_local_only(tmp_path):
     rs = results({**BUNDLE, "agents": []}, tmp_path)
-    assert [r["agent"] for r in rs] == ["privacy"] and rs[0]["status"] == "ok" and "no key" in rs[0]["summary"]
+    assert [r["agent"] for r in rs] == ["privacy"] and rs[0]["status"] == "ok" and "No model pass" in rs[0]["summary"]
 
 
 def test_anchor_and_one_review():
@@ -84,3 +84,15 @@ def test_throttled_posts_are_retried(monkeypatch):
     monkeypatch.setattr(publish.subprocess, "run", fake)
     monkeypatch.setattr(publish.time, "sleep", lambda s: None)
     assert publish.gh("repos/x/pulls/1/reviews", "--method", "POST", payload={}) == "{}" and len(calls) == 2
+
+
+def test_agents_that_could_not_run_are_shown_not_hidden(tmp_path):
+    b = {**BUNDLE, "agents": [], "gap": ["reviewer", "privacy", "safety"],
+         "notice": "diff is 194363 chars, over max_context_chars: not sent to a model"}
+    rs = {r["agent"]: r for r in results(b, tmp_path)}
+    assert set(rs) == {"reviewer", "privacy", "safety"}
+    assert rs["reviewer"]["status"] == rs["safety"]["status"] == "error"
+    assert "not reviewed: diff is 194363" in rs["reviewer"]["error"]
+    assert rs["privacy"]["status"] == "ok" and "No model pass: diff is 194363" in rs["privacy"]["summary"]
+    review, failed = build(list(rs.values()), b)
+    assert failed and review["body"].count("Not approved.") == 2

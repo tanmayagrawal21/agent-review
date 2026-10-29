@@ -1,7 +1,6 @@
 # .github/agent-review.yml. Read from the PR's base branch, so a PR cannot change its own review.
 # Endpoint, model and key belong in secrets (AGENT_REVIEW_BASE_URL, AGENT_REVIEW_MODEL, AGENT_REVIEW_API_KEY):
-# this file is public. base_url / model here are only a fallback when the secrets are not set.
-api: openai              # openai: any OpenAI-compatible endpoint | anthropic: Messages API
+# this file is public. Every key below is optional; the values shown are the defaults.
 agents:
   reviewer: {enabled: true}
   privacy:  {enabled: true}
@@ -11,5 +10,5 @@ blocking: false          # true: the check fails when an agent requests changes,
 max_context_chars: 150000
 warn_changed_lines: 1000 # note long PRs in the review (0 = never)
 skip: {draft: true, max_changed_lines: 0}   # 0 = no limit
-instructions: |
-  Payments code lives in billing/. Amounts are integer cents; never floats.
+# instructions: |       # notes every agent reads (default: none), e.g.:
+#   Payments code lives in billing/. Amounts are integer cents; never floats.
