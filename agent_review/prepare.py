@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import pii
 from .config import AGENTS, load
-from .diff import changed, git, walk
+from .diff import HUNK, changed, git, walk
 
 
 def decide(cfg: dict, files: list[str], lines: int, draft: bool, has_key: bool, has_url: bool = False) -> dict:
@@ -67,8 +67,9 @@ def build(repo: Path, base: str, head: str, cfg: dict, plan: dict, title: str, b
 
     i, new_diff, local = 0, [], []
     for f, kind, n, t in rows:
-        if kind == "meta":
-            new_diff.append(t)
+        if kind == "meta":  # git appends a nearby source line to hunk headers: keep only the line ranges
+            m = HUNK.match(t)
+            new_diff.append(m.group(0) if m else t)
             continue
         new_diff.append(kind + redacted[i])
         if kind == "+" and f:
