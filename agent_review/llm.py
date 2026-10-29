@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import http.client
 import json
-import re
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
