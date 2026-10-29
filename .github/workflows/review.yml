@@ -24,6 +24,9 @@ on:
         required: false
       CLAUDE_CODE_OAUTH_TOKEN:
         required: false
+      AGENT_REVIEW_API_KEY:
+        description: Key for an OpenAI-compatible endpoint (set engine/base_url/model in the config)
+        required: false
       AGENT_REVIEW_PRIVATE_TERMS:
         description: Optional. One private term per line; matched in plain code, never shown to a model
         required: false
@@ -38,6 +41,8 @@ jobs:
     outputs:
       run: ${{ steps.plan.outputs.run }}
       agents: ${{ steps.plan.outputs.agents }}
+      engine: ${{ steps.plan.outputs.engine }}
+      local: ${{ steps.plan.outputs.local }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,13 +64,14 @@ jobs:
         working-directory: tool
         env:
           HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+          HAS_API_KEY: ${{ secrets.AGENT_REVIEW_API_KEY != '' }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           DRAFT: ${{ github.event.pull_request.draft }}
           CONFIG: ${{ inputs.config }}
         run: >
           python -m agent_review.plan --repo ../pr --config "$CONFIG" --base "$BASE" --head "$HEAD"
-          --draft "$DRAFT" --has-key "$HAS_KEY"
+          --draft "$DRAFT" --has-key "$HAS_KEY" --has-api-key "$HAS_API_KEY"
 
   agent:
     needs: plan
@@ -94,11 +100,29 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -q "pyyaml==6.0.2" && npm install -g "@anthropic-ai/claude-code@${{ inputs.claude-code-version }}"
+      - run: pip install -q "pyyaml==6.0.2"
+      - name: Install Claude Code (claude-code engine only)
+        if: needs.plan.outputs.engine == 'claude-code'
+        env:
+          VERSION: ${{ inputs.claude-code-version }}
+        run: npm install -g "@anthropic-ai/claude-code@$VERSION"
+      - name: Cache the local PII model
+        if: matrix.agent == 'privacy' && needs.plan.outputs.local == 'true'
+        uses: actions/cache@v4
+        with:
+          path: tool/agent_review/js/node_modules
+          key: local-pii-${{ hashFiles('tool/agent_review/js/package-lock.json') }}
+      - name: Install the local PII model (privacy, local engine)
+        if: matrix.agent == 'privacy' && needs.plan.outputs.local == 'true'
+        working-directory: tool/agent_review/js
+        run: |
+          [ -d node_modules/@nationaldesignstudio/rampart ] || npm ci --ignore-scripts --no-audit --no-fund
+          node pii.mjs <<< '[{"id":0,"text":"warm up"}]' > /dev/null   # fetches and caches the model once
       - working-directory: tool
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          AGENT_REVIEW_API_KEY: ${{ secrets.AGENT_REVIEW_API_KEY }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE: ${{ github.event.pull_request.base.sha }}

@@ -7,14 +7,14 @@ Exit status: 0, or 1 when `blocking: true` and an agent requested changes or fai
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
-import re
 import subprocess
 from pathlib import Path
 
 from .config import AGENTS, load_at
-from .privacy import load_terms, redact, scan_added
+from .privacy import load_terms, redact, scan_added, walk
 
 MARKER = "<!-- agent-review -->"
 MAX_BODY = 60_000  # GitHub's limit is 65,536 characters
@@ -24,18 +24,9 @@ TITLES = {"reviewer": "Reviewer", "privacy": "Privacy", "safety": "Safety", "sca
 def commentable(diff: str) -> dict[str, set[int]]:
     """Lines on the new side of each hunk (added or context): the only places GitHub accepts inline comments."""
     out: dict[str, set[int]] = {}
-    file, line = "", 0
-    prev = ""
-    for raw in diff.splitlines():
-        header, prev = raw.startswith("+++ ") and prev.startswith("--- "), raw
-        if header:
-            file = raw[6:] if raw.startswith("+++ b/") else ""
-        elif raw.startswith("@@"):
-            m = re.search(r"\+(\d+)", raw)
-            line = int(m.group(1)) if m else 0
-        elif file and (raw.startswith("+") or raw.startswith(" ")):
+    for file, kind, line, _ in walk(diff):
+        if file and kind in ("+", " "):
             out.setdefault(file, set()).add(line)
-            line += 1
     return out
 
 
@@ -167,6 +158,7 @@ def main() -> int:
     terms = load_terms(a.terms)
     diff = subprocess.run(["git", "-C", str(a.repo_dir), "diff", f"{a.base}...{a.head}"], check=True,
                           capture_output=True, text=True).stdout
+    @functools.cache
     def read_head(path: str) -> str | None:
         r = subprocess.run(["git", "-C", str(a.repo_dir), "show", f"{a.head}:{path}"], capture_output=True, text=True)
         return r.stdout if r.returncode == 0 else None

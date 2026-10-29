@@ -4,6 +4,7 @@ reach a model, so a pull request cannot talk an agent into revealing them. Findi
 
 from __future__ import annotations
 
+import codecs
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,23 +34,61 @@ class Hit:
     term: int  # 1-based index into the terms file
 
 
-def scan_added(diff: str, terms: list[str]) -> list[Hit]:
-    """Hits in added lines and in new file paths of a unified diff."""
-    pats, hits, file, line = patterns(terms), [], "", 0
-    prev = ""
+def header_path(p: str) -> str:
+    """The new-side path of a '+++' header: git C-quotes unusual names and may append a tab."""
+    p = p.rstrip("\n").split("\t", 1)[0]
+    if p.startswith('"') and p.endswith('"'):
+        p = codecs.escape_decode(p[1:-1].encode())[0].decode("utf-8", "replace")
+    return p[2:] if p.startswith("b/") else ""
+
+
+HUNK = re.compile(r"@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+
+def walk(diff: str):
+    """(file, kind, new-side line) for each hunk line, kind in '+', ' ', '-' (line None for '-'), plus
+    ('header', file) entries. Headers are recognised only between hunks, by counting each hunk's lines, so
+    content such as an added line '++ x' after a removed '-- x' cannot pose as a file header."""
+    file, line, old_left, new_left = "", 0, 0, 0
     for raw in diff.splitlines():
-        header, prev = raw.startswith("+++ ") and prev.startswith("--- "), raw
-        if header:
-            file = raw[6:] if raw.startswith("+++ b/") else ""
-            hits += [Hit(file, None, i) for i, p in enumerate(pats, 1) if file and p.search(file)]
-        elif raw.startswith("@@"):
-            m = re.search(r"\+(\d+)", raw)
-            line = int(m.group(1)) if m else 0
-        elif raw.startswith("+"):
-            hits += [Hit(file, line, i) for i, p in enumerate(pats, 1) if p.search(raw[1:])]
-            line += 1
-        elif not raw.startswith("-") and not raw.startswith("\\"):
-            line += 1
+        if old_left <= 0 and new_left <= 0:
+            if raw.startswith("+++ "):
+                file = header_path(raw[4:])
+                yield file, "header", None, ""
+                continue
+            m = HUNK.match(raw)
+            if m:
+                line, old_left, new_left = int(m.group(2)), int(m.group(1) or 1), int(m.group(3) or 1)
+            continue
+        if raw.startswith("\\"):
+            continue
+        if raw.startswith("+"):
+            yield file, "+", line, raw[1:]
+            line, new_left = line + 1, new_left - 1
+        elif raw.startswith("-"):
+            yield file, "-", None, raw[1:]
+            old_left -= 1
+        else:
+            yield file, " ", line, raw[1:]
+            line, old_left, new_left = line + 1, old_left - 1, new_left - 1
+
+
+def added_lines(diff: str):
+    """(file, new-side line number, text) for every added line of a unified diff."""
+    for file, kind, line, text in walk(diff):
+        if kind == "+" and file:
+            yield file, line, text
+
+
+def new_files(diff: str) -> list[str]:
+    return [f for f, kind, _, _ in walk(diff) if kind == "header" and f]
+
+
+def scan_added(diff: str, terms: list[str]) -> list[Hit]:
+    """Hits in added lines and in the paths of changed files."""
+    pats = patterns(terms)
+    hits = [Hit(f, None, i) for f in new_files(diff) for i, p in enumerate(pats, 1) if p.search(f)]
+    hits += [Hit(f, n, i) for f, n, text in added_lines(diff) for i, p in enumerate(pats, 1) if p.search(text)]
     return hits
 
 
