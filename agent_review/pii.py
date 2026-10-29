@@ -5,7 +5,8 @@ Per line: provider-format secrets -> [SECRET] (Rampart is a personal-data model 
 Rampart, the on-device PII model (https://huggingface.co/nationaldesignstudio/rampart), replaces personal data
 with stable placeholders ([GIVEN_NAME_1], [EMAIL_1], ...). Every line of every file is redacted whole: no
 parsing of strings or comments that a heredoc or an unusual quote could defeat. Obviously fictional fixtures
-(example.com, Jane Doe, 555-01xx) are left alone. Findings are stricter than redaction: in code files a
+(example.com, Jane Doe, 555-01xx) are redacted like anything else but not reported. Findings are stricter
+than redaction: in code files a
 detection is reported only inside a string or comment, or when it looks like data (several words, digits, @),
 so an identifier such as `django` may be masked for the model but is not reported as a name. Line structure is
 preserved, so line numbers

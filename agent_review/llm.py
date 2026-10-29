@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import http.client
 import json
-import re
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 
 KEY_ENV = "AGENT_REVIEW_API_KEY"
 UNSUPPORTED = {400, 404, 415, 422, 501}  # how providers say "not this request format"
@@ -25,16 +25,23 @@ _open = urllib.request.build_opener(_NoRedirect).open
 
 
 def extract(content: str) -> dict | None:
-    """A JSON object from a reply, bare or wrapped in prose or a code fence."""
-    try:
-        d = json.loads(content)
-    except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", content, re.S)
+    """The answer object in a reply: bare, fenced, or surrounded by prose that may contain braces. Only top-level
+    objects count (an echoed schema's nested "verdict" is not one); the last object with a verdict wins, and
+    objects with conflicting verdicts are no answer at all (fail closed)."""
+    dec, found, i = json.JSONDecoder(), [], content.find("{")
+    while i != -1:
         try:
-            d = json.loads(m.group(0)) if m else None
+            d, end = dec.raw_decode(content, i)
         except json.JSONDecodeError:
-            return None
-    return d if isinstance(d, dict) else None
+            i = content.find("{", i + 1)
+            continue
+        if isinstance(d, dict):
+            found.append(d)
+        i = content.find("{", end)
+    verdicts = [d for d in found if "verdict" in d]
+    if len({json.dumps(d.get("verdict")) for d in verdicts}) > 1:
+        return None
+    return (verdicts or found or [None])[-1]
 
 
 def _post(url: str, body: dict, headers: dict, opener, timeout: int) -> dict:
@@ -62,18 +69,23 @@ def call(cfg: dict, key: str, system: str, user: str, schema: dict, opener=_open
     """Returns {"structured": dict | None, "tokens": {...}, "error": str | None}."""
     asked = user + f"\n\nReply with only a JSON object matching this JSON Schema:\n{json.dumps(schema)}"
     base = cfg["base_url"].rstrip("/")
+    host = urlparse(base).hostname or ""
+    # an Anthropic host always uses the Messages API, even if `api: openai` is set
+    api = "anthropic" if host == "anthropic.com" or host.endswith(".anthropic.com") else cfg["api"]
     try:
-        if cfg["api"] == "anthropic":
-            d = _post(base + "/v1/messages", {"model": cfg["model"], "max_tokens": 8192, "temperature": 0,
+        if api == "anthropic":  # no temperature: newer models reject it
+            d = _post(base.removesuffix("/v1") + "/v1/messages", {"model": cfg["model"], "max_tokens": 8192,
                                               "system": system, "messages": [{"role": "user", "content": asked}]},
                       {"x-api-key": key, "anthropic-version": "2023-06-01"}, opener, timeout)
+            if d.get("stop_reason") == "max_tokens":  # a cut-off reply is never an answer
+                return {"structured": None, "tokens": tokens(d.get("usage")), "error": "reply truncated"}
             text = "".join(b.get("text", "") for b in d.get("content") or [] if isinstance(b, dict))
             return {"structured": extract(text), "tokens": tokens(d.get("usage")), "error": None}
         code = None
         for fmt, content in ((
                 {"type": "json_schema", "json_schema": {"name": "review", "schema": schema}}, user),
                 ({"type": "json_object"}, asked), (None, asked)):
-            body = {"model": cfg["model"], "temperature": 0,
+            body = {"model": cfg["model"],
                     "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}]}
             if fmt:
                 body["response_format"] = fmt
@@ -84,6 +96,8 @@ def call(cfg: dict, key: str, system: str, user: str, schema: dict, opener=_open
                 if e.code in UNSUPPORTED:
                     continue  # try a simpler response format
                 raise
+            if d["choices"][0].get("finish_reason") == "length":  # a cut-off reply is never an answer
+                return {"structured": None, "tokens": tokens(d.get("usage")), "error": "reply truncated"}
             text = str(d["choices"][0]["message"]["content"] or "")
             return {"structured": extract(text), "tokens": tokens(d.get("usage")), "error": None}
         return {"structured": None, "tokens": tokens({}), "error": f"HTTP {code} from the model endpoint"}

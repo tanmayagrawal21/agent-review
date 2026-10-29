@@ -81,3 +81,40 @@ def test_an_agent_prepare_did_not_schedule_sends_nothing():
     o, calls = opener()
     r = review.run("safety", {**BUNDLE, "agents": ["reviewer"]}, "k", o)
     assert r["status"] == "error" and calls == []
+
+
+def test_anthropic_host_is_detected_and_no_temperature_is_sent():
+    reply = {"content": [{"type": "text", "text": json.dumps(OK)}], "usage": {}}
+    for url in ("https://api.anthropic.com", "https://api.anthropic.com/v1"):
+        o, calls = opener(reply)
+        b = {**BUNDLE, "config": {**BUNDLE["config"], "api": "openai", "base_url": url}}
+        assert review.run("reviewer", b, "k", o)["status"] == "ok"
+        assert calls[0][0] == "https://api.anthropic.com/v1/messages" and "temperature" not in calls[0][2]
+    o, calls = opener({"choices": [{"message": {"content": json.dumps(OK)}}]})
+    review.run("reviewer", BUNDLE, "k", o)
+    assert "temperature" not in calls[0][2]
+
+
+def test_verdict_is_found_in_prose_that_contains_braces():
+    from agent_review.llm import extract
+    reply = "Checked `cfg = {**a}` and `{x}`.\n```json\n" + json.dumps(OK) + "\n```\nAlso see {notes}."
+    assert extract(reply)["verdict"] == "approve"
+
+
+def test_an_example_verdict_or_echoed_schema_never_wins():
+    from agent_review.llm import extract
+    real = json.dumps({"verdict": "changes", "summary": "s", "findings": []})
+    assert extract('Format: {"verdict": "approve"}\n' + real) is None  # conflicting verdicts: fail closed
+    same = 'e.g. {"verdict": "changes"} then ' + real
+    assert extract(same)["summary"] == "s"  # the last top-level object wins
+    schema = json.dumps({"type": "object", "properties": {"verdict": {"type": "string"}}})
+    assert extract(schema + "\n" + real)["verdict"] == "changes"  # nested schema "verdict" is not an answer
+
+
+def test_a_truncated_reply_is_an_error_not_an_answer():
+    cut = 'Example: {"verdict": "approve"}\n{"verdict": "changes", "summ'
+    o, _ = opener({"choices": [{"message": {"content": cut}, "finish_reason": "length"}]})
+    assert review.run("reviewer", BUNDLE, "k", o)["error"] == "reply truncated"
+    o, _ = opener({"content": [{"type": "text", "text": cut}], "stop_reason": "max_tokens"})
+    b = {**BUNDLE, "config": {**BUNDLE["config"], "base_url": "https://api.anthropic.com"}}
+    assert review.run("reviewer", b, "k", o)["error"] == "reply truncated"
