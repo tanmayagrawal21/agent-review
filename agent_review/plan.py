@@ -13,13 +13,17 @@ from .config import AGENTS, load_at
 
 
 def changed(repo: Path, base: str, head: str) -> tuple[list[str], int]:
-    out = subprocess.run(["git", "-C", str(repo), "diff", "--numstat", f"{base}...{head}"], check=True,
+    out = subprocess.run(["git", "-C", str(repo), "diff", "-z", "--numstat", f"{base}...{head}"], check=True,
                          capture_output=True, text=True).stdout
-    files, lines = [], 0
-    for row in out.splitlines():
-        add, rem, path = row.split("\t", 2)
+    files, lines, fields = [], 0, out.split("\0")
+    i = 0
+    while i < len(fields) and fields[i]:
+        add, rem, path = fields[i].split("\t", 2)
+        if not path:  # a rename: the old and new paths follow as separate fields
+            path, i = fields[i + 2], i + 2
         files.append(path)
         lines += (int(add) if add.isdigit() else 0) + (int(rem) if rem.isdigit() else 0)
+        i += 1
     return files, lines
 
 

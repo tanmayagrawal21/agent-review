@@ -85,12 +85,19 @@ def build(results: list[dict], diff: str, sha: str, terms: list[str]) -> tuple[d
     results = sorted(results, key=lambda r: order.get(r["agent"], 99))
     failed = any(r["status"] != "ok" or r["verdict"] == "changes" for r in results)
     head = [MARKER, f"## Agent review of `{sha[:7]}`", "",
-            "| agent | result | blocking | suggestions |", "|---|---|---|---|"]
+            "| agent | result | blocking | suggestions | engine | tokens in / cached / out |",
+            "|---|---|---|---|---|---|"]
+    total = {"input": 0, "cached": 0, "output": 0}
     for r in results:
         fs = r["findings"]
         res = "error" if r["status"] != "ok" else ("changes requested" if r["verdict"] == "changes" else "approved")
         blocking = sum(f["severity"] == "blocking" for f in fs)
-        head.append(f"| {TITLES.get(r['agent'], r['agent'])} | {res} | {blocking} | {len(fs) - blocking} |")
+        t = {k: int((r.get("tokens") or {}).get(k) or 0) for k in total}
+        total = {k: total[k] + t[k] for k in total}
+        engine = r.get("engine") or ("plain code" if r["agent"] == "scanner" else "-")
+        head.append(f"| {TITLES.get(r['agent'], r['agent'])} | {res} | {blocking} | {len(fs) - blocking} | {engine} | "
+                    f"{t['input']:,} / {t['cached']:,} / {t['output']:,} |")
+    head.append(f"| **total** | | | | | **{total['input']:,} / {total['cached']:,} / {total['output']:,}** |")
     comments, body_items = [], []
     for file, line, items in group(results):
         if line and line in lines.get(file, set()):

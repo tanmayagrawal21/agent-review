@@ -43,7 +43,8 @@ def test_api_engine_sends_diff_and_files_and_parses_the_verdict(repo, monkeypatc
         {"file": "app.py", "line": 2, "severity": "blocking", "message": "b"}]}))
     a = types.SimpleNamespace(agent="reviewer", repo=r, base=base, head=head)
     res = run_api(a, cfg, ["reviewer"], opener=opener)
-    assert (res["status"], res["verdict"], res["usage"]["prompt_tokens"]) == ("ok", "changes", 900)
+    assert (res["status"], res["verdict"]) == ("ok", "changes")
+    assert res["tokens"] == {"input": 900, "cached": 0, "output": 80} and res["engine"] == "openai-compatible"
     sent = calls[0]
     assert sent["model"] == "some-model" and sent["response_format"]["type"] == "json_schema"
     user = sent["messages"][1]["content"]
@@ -101,9 +102,12 @@ def test_local_engine_missing_model_is_an_error_not_a_pass(monkeypatch, tmp_path
 
 
 def test_merge_and_scrub_cover_other_providers():
-    a = {"status": "ok", "verdict": "approve", "summary": "local", "findings": [], "cost_usd": 0}
-    b = {"status": "ok", "verdict": "changes", "summary": "llm", "findings": [{"m": 1}], "cost_usd": 0.01}
-    assert merge("privacy", "h", [a, b])["verdict"] == "changes"
+    a = {"status": "ok", "verdict": "approve", "summary": "local", "findings": [], "engine": "local",
+         "tokens": {"input": 0, "cached": 0, "output": 0}}
+    b = {"status": "ok", "verdict": "changes", "summary": "llm", "findings": [{"m": 1}], "engine": "claude-code",
+         "tokens": {"input": 5, "cached": 7, "output": 3}}
+    m = merge("privacy", "h", [a, b])
+    assert m["verdict"] == "changes" and m["tokens"] == {"input": 5, "cached": 7, "output": 3}
     half = merge("privacy", "h", [b, {"status": "error", "error": "x", "findings": []}])
     assert half["status"] == "error" and half["findings"] == [{"m": 1}]
     leaked = "sk-proj-" + "A" * 40 + " and ghp_" + "b" * 36
