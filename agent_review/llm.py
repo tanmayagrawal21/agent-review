@@ -11,6 +11,7 @@ import json
 import re
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 
 KEY_ENV = "AGENT_REVIEW_API_KEY"
 UNSUPPORTED = {400, 404, 415, 422, 501}  # how providers say "not this request format"
@@ -62,9 +63,11 @@ def call(cfg: dict, key: str, system: str, user: str, schema: dict, opener=_open
     """Returns {"structured": dict | None, "tokens": {...}, "error": str | None}."""
     asked = user + f"\n\nReply with only a JSON object matching this JSON Schema:\n{json.dumps(schema)}"
     base = cfg["base_url"].rstrip("/")
+    host = urlparse(base).hostname or ""
+    api = "anthropic" if host == "anthropic.com" or host.endswith(".anthropic.com") else cfg["api"]
     try:
-        if cfg["api"] == "anthropic":
-            d = _post(base + "/v1/messages", {"model": cfg["model"], "max_tokens": 8192, "temperature": 0,
+        if api == "anthropic":  # no temperature: newer models reject it
+            d = _post(base.removesuffix("/v1") + "/v1/messages", {"model": cfg["model"], "max_tokens": 8192,
                                               "system": system, "messages": [{"role": "user", "content": asked}]},
                       {"x-api-key": key, "anthropic-version": "2023-06-01"}, opener, timeout)
             text = "".join(b.get("text", "") for b in d.get("content") or [] if isinstance(b, dict))
@@ -73,7 +76,7 @@ def call(cfg: dict, key: str, system: str, user: str, schema: dict, opener=_open
         for fmt, content in ((
                 {"type": "json_schema", "json_schema": {"name": "review", "schema": schema}}, user),
                 ({"type": "json_object"}, asked), (None, asked)):
-            body = {"model": cfg["model"], "temperature": 0,
+            body = {"model": cfg["model"],
                     "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}]}
             if fmt:
                 body["response_format"] = fmt

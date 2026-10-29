@@ -81,3 +81,15 @@ def test_an_agent_prepare_did_not_schedule_sends_nothing():
     o, calls = opener()
     r = review.run("safety", {**BUNDLE, "agents": ["reviewer"]}, "k", o)
     assert r["status"] == "error" and calls == []
+
+
+def test_anthropic_host_is_detected_and_no_temperature_is_sent():
+    reply = {"content": [{"type": "text", "text": json.dumps(OK)}], "usage": {}}
+    for url in ("https://api.anthropic.com", "https://api.anthropic.com/v1"):
+        o, calls = opener(reply)
+        b = {**BUNDLE, "config": {**BUNDLE["config"], "api": "openai", "base_url": url}}
+        assert review.run("reviewer", b, "k", o)["status"] == "ok"
+        assert calls[0][0] == "https://api.anthropic.com/v1/messages" and "temperature" not in calls[0][2]
+    o, calls = opener({"choices": [{"message": {"content": json.dumps(OK)}}]})
+    review.run("reviewer", BUNDLE, "k", o)
+    assert "temperature" not in calls[0][2]
