@@ -50,8 +50,6 @@ FICTIONAL = re.compile("|".join([
     r"\b(?:Jane|John|Richard|Mary)\s+(?:Q\.\s+)?(?:Doe|Roe|Public)\b",
     r"(?:\+?1[\s.-]?)?(?:\(\d{3}\)\s?|\d{3}[\s.-])?555[\s.-]?01\d\d\b",
 ]), re.I)
-BLOCKING = {"SSN", "CREDIT_CARD", "BANK_ACCOUNT", "ROUTING_NUMBER", "TAX_ID", "PASSPORT", "DRIVERS_LICENSE",
-            "GOVERNMENT_ID"}
 REVIEW = {"GIVEN_NAME": "name", "SURNAME": "name", "EMAIL": "email address", "PHONE": "phone number",
           "BUILDING_NUMBER": "street address", "STREET_NAME": "street address", "SECONDARY_ADDRESS": "street address",
           "IP_ADDRESS": "IP address"}
@@ -138,7 +136,7 @@ def process(items: list[tuple[str, str]], run=run_model) -> tuple[list[str], lis
             else:
                 groups.append([a, b, [lb]])
         kept = [(a, b, lbs) for a, b, lbs in groups if reportable(items[i][0], original[i], x + a, x + b)
-                and not FICTIONAL.fullmatch(orig[a:b].strip())]
+                and not FICTIONAL.fullmatch(orig[a:b].strip()) and plausible(orig[a:b], lbs)]
         found[i]["labels"] += [lb for _, _, lbs in kept for lb in lbs]
         found[i]["spans"] += [(x + a, x + b, lbs) for a, b, lbs in kept]
         found[i]["line"] = original[i]  # secrets already masked as [SECRET]; personal data is not
@@ -146,34 +144,46 @@ def process(items: list[tuple[str, str]], run=run_model) -> tuple[list[str], lis
     return lines, found
 
 
+NAMEISH = re.compile(r"[A-Z][a-z'-]+(?:[ \t]+[A-Z][a-z'-]+)*\.?")
+DISCLAIMER = ("Rampart is an on-device model and can be wrong; check it yourself, and if it is real, replace it "
+              "with an obviously fictional value (Jane Doe, jane@example.com, 555-0100).")
+
+
+def plausible(text: str, labels: list[str]) -> bool:
+    """A name detection is reported only if it is shaped like a name (capitalised words). Other labels pass."""
+    if not set(labels) <= {"GIVEN_NAME", "SURNAME"}:
+        return True
+    return bool(NAMEISH.fullmatch(text.strip()))
+
+
 def highlight(line: str, spans: list[tuple[int, int, list[str]]]) -> str:
-    """The line with a caret underline under each detection, labelled, as a code block."""
-    marks = [" "] * len(line)
+    """The line with a caret underline under each detection, labelled, in a fence longer than any backtick run
+    in the line (so the line cannot close it). Tabs become spaces so the carets line up."""
+    col = lambda k: len(line[:k].expandtabs(4))  # noqa: E731 - span offsets are in the unexpanded line
+    shown = line.expandtabs(4)
+    marks = [" "] * len(shown)
     for a, b, _ in spans:
-        for k in range(a, min(b, len(line))):
+        for k in range(col(a), min(col(b), len(shown))):
             marks[k] = "^"
+    line = shown
     names = ", ".join(sorted({REVIEW.get(lb, lb.lower().replace("_", " ")) for _, _, lbs in spans for lb in lbs}))
-    return f"\n```\n{line}\n{''.join(marks).rstrip()} {names}\n```"
+    fence = "`" * max(3, 1 + max((len(m) for m in re.findall(r"`+", line)), default=0))
+    return f"\n{fence}\n{line}\n{''.join(marks).rstrip()} {names}\n{fence}"
 
 
 def findings(file: str, line: int, hit: dict) -> list[dict]:
-    """What the local scan reports for one added line. Personal data is highlighted in place on the line;
-    secrets stay masked as [SECRET]."""
-    shown = highlight(hit["line"], hit["spans"]) if hit.get("spans") and hit.get("line") is not None else ""
+    """What the local scan reports for one added line. Provider-format secrets are blocking (masked as [SECRET]).
+    Rampart's PII is never blocking: one suggestion per line, highlighted in place, with a disclaimer."""
     out = [{"file": file, "line": line, "severity": "blocking", "category": name,
             "message": f"Looks like a {name} in a real provider format. Remove it, rotate it if it was ever real, "
                        "and load it from a secret store; use an obviously fake value in tests."}
            for name in hit["secrets"]]
-    hard = sorted({lb for lb in hit["labels"] if lb in BLOCKING} - ({"CREDIT_CARD"} if hit["secrets"] else set()))
-    soft = sorted({REVIEW[lb] for lb in hit["labels"] if lb in REVIEW})
-    if hard:
-        out.append({"file": file, "line": line, "severity": "blocking", "category": "potential PII",
-                    "message": f"Rampart detected {', '.join(h.lower().replace('_', ' ') for h in hard)}. Remove it or "
-                               f"use an obviously fictional value.{shown}"})
-    elif soft:
+    spans = [s for s in hit.get("spans", []) if not (hit["secrets"] and s[2] == ["CREDIT_CARD"])]
+    if spans and hit.get("line") is not None:
+        kinds = sorted({REVIEW.get(lb, lb.lower().replace("_", " ")) for _, _, lbs in spans for lb in lbs})
         out.append({"file": file, "line": line, "severity": "suggestion", "category": "potential PII",
-                    "message": f"Rampart detected a possible {', '.join(soft)}. Check it is not real; if it is, use an "
-                               f"obviously fictional value (Jane Doe, jane@example.com, 555-0100).{shown}"})
+                    "message": f"Rampart flagged a possible {', '.join(kinds)}. {DISCLAIMER}"
+                               f"{highlight(hit['line'], spans)}"})
     return out
 
 

@@ -104,7 +104,7 @@ def test_privacy_section_counts_rampart_pii_and_keeps_other_concerns(tmp_path):
     write(tmp_path, "privacy", summary="Logs the full request body.")
     rs = {r["agent"]: r for r in results({**BUNDLE, "local_findings": local}, tmp_path)}
     s = rs["privacy"]["summary"]
-    assert s.startswith("**2 potential PII detected** by Rampart") and "may not be accurate" in s
+    assert s.startswith("**1 line(s) with potential PII** flagged by Rampart") and "never blocking" in s
     assert "Other privacy concerns: Logs the full request body." in s
     review, _ = build(list(rs.values()), {**BUNDLE, "local_findings": local})
     assert sum("potential PII" in c["body"] for c in review["comments"]) == 1  # identical findings posted once

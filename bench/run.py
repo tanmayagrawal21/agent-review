@@ -81,7 +81,8 @@ def run_case(cid: str, case: dict, config: str, parallel: bool) -> dict:
         for c in review["comments"]:
             placed.setdefault((c["path"], c["line"]), set()).add("blocking" if "**blocking**" in c["body"] else "s")
         exp = {(f, n) for f, n, _ in expected}
-        leaked = [w for w in case.get("never_sent", []) if w in json.dumps(bundle)]
+        sent = {k: bundle[k] for k in ("diff", "log", "title", "body", "files")}  # what a model can receive
+        leaked = [w for w in case.get("never_sent", []) if w in json.dumps(sent)]
         return {"case": cid, "expected": len(expected), "clean": not expected,
                 "caught": sum((f, n) in placed for f, n, _ in expected),
                 "blocked": sum("blocking" in placed.get((f, n), set()) for f, n, _ in expected),

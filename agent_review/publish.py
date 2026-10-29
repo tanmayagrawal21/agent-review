@@ -45,11 +45,13 @@ def results(bundle: dict, findings_dir: Path) -> list[dict]:
     if bundle.get("privacy"):
         local = bundle["local_findings"]
         llm = next((r for r in out if r["agent"] == "privacy"), None)
-        n_pii = sum(f.get("category") == "potential PII" for f in local)
-        n_sec = len(local) - n_pii
-        summary = (f"**{n_pii} potential PII detected** by Rampart, an on-device model. Its detections may not be "
-                   "accurate: check each highlighted line." + (f" {n_sec} secret(s) in a provider format." if n_sec
-                                                                 else ""))
+        n_pii = len({(f["file"], f["line"]) for f in local if f.get("category") == "potential PII"})
+        n_sec = sum(f.get("category") != "potential PII" for f in local)
+        summary = (f"**{n_pii} line(s) with potential PII** flagged by Rampart, an on-device model. These are never "
+                   "blocking and may be wrong: check each highlighted line yourself." if n_pii else
+                   "Rampart, an on-device PII model, flagged nothing (it can miss things).")
+        if n_sec:
+            summary += f" {n_sec} secret(s) in a provider format."
         if llm is None:
             out.append({"agent": "privacy", "status": "ok", "summary": summary + f" No model pass: {why}.",
                         "findings": local, "tokens": ZERO, "engine": "local",
