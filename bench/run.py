@@ -3,8 +3,11 @@ through the real pipeline: prepare (real Rampart) -> review per agent -> publish
 against the planted lines.
 
     uv run python bench/run.py --setup local --out bench/results/local.json
-    AGENT_REVIEW_API_KEY=... uv run python bench/run.py --setup cloud --model gpt-5.1-mini \
-        --base-url https://api.openai.com/v1 --out bench/results/cloud.json
+    uv run python bench/run.py --setup cloud --out bench/results/cloud.json
+
+Cloud reads the key from the macOS Keychain (service "agent-review-api-key"; add it with
+`security add-generic-password -a "$USER" -s agent-review-api-key -w`), and the endpoint and model from
+AGENT_REVIEW_BASE_URL / AGENT_REVIEW_MODEL, so none of them is typed on a command line or written to the results.
 """
 
 from __future__ import annotations
@@ -100,7 +103,15 @@ def main() -> int:
     a = ap.parse_args()
     if a.setup == "local":
         os.environ.setdefault("AGENT_REVIEW_API_KEY", "ollama")
-    config = f"api: {a.api}\nbase_url: {a.base_url}\nmodel: {a.model}\n"
+        config = f"api: {a.api}\nbase_url: {a.base_url}\nmodel: {a.model}\n"
+    else:
+        if not os.environ.get("AGENT_REVIEW_API_KEY"):
+            os.environ["AGENT_REVIEW_API_KEY"] = subprocess.run(
+                ["security", "find-generic-password", "-s", "agent-review-api-key", "-w"],
+                capture_output=True, text=True, check=True).stdout.strip()
+        if not (os.environ.get("AGENT_REVIEW_BASE_URL") and os.environ.get("AGENT_REVIEW_MODEL")):
+            raise SystemExit("set AGENT_REVIEW_BASE_URL and AGENT_REVIEW_MODEL for the cloud setup")
+        config, a.model = f"api: {a.api}\n", "(from AGENT_REVIEW_MODEL)"  # never recorded in the results
     rows = [run_case(cid, case, config, a.setup == "cloud") for cid, case in CASES.items()]
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps({"setup": a.setup, "model": a.model, "rows": rows}, indent=2))

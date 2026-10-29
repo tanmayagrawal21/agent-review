@@ -46,7 +46,16 @@ Details, diagrams and the trust model: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.
 
 ## Measured
 
-Benchmark: [`bench/`](bench/run.py), with planted-problem PRs scored on caught, blocked, false blocks, unredacted sends and tokens. Results are being added.
+[`bench/`](bench/run.py): 7 fictional PRs with 7 planted problems (a loosened limit, an env override, a leaked
+key, an auth bypass, SQL injection, a pagination bug, personal data in a fixture) and 2 clean PRs, run through
+the real pipeline with redaction on.
+
+| setup | caught | blocked | false blocks (clean PRs) | unredacted sends | tokens in / cached / out |
+|---|---|---|---|---|---|
+| local: qwen3.5 9B on Ollama, $0 | 7/7 | 6/7 | 0 | 0 | 15.3k / 6.9k / 12.9k |
+
+The one non-blocking catch is the personal-data fixture: names, emails and phones are suggestions by design.
+That is one run on a small set, so it's a smoke test, not a benchmark.
 
 ## License
 
