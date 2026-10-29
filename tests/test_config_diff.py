@@ -10,7 +10,8 @@ def test_defaults_and_validation():
     cfg = parse("")
     assert cfg["redact"] is True and cfg["blocking"] is False and cfg["api"] == "openai"
     for bad in ("agents:\n  reviewr: {}\n", "model: 'x; rm -rf /'\n", "api: magic\n",
-                "base_url: http://example.com/v1\n", "base_url: http://localhost.evil.example/v1\n"):
+                "base_url: http://example.com/v1\n", "base_url: http://localhost.evil.example/v1\n",
+                "max_context_chars: true\n", "skip: 3\n", "agents:\n  reviewer: 3\n"):
         with pytest.raises(ConfigError):
             parse(bad)
     assert parse("base_url: http://localhost:11434/v1\nmodel: qwen3.5:9b\n")["model"] == "qwen3.5:9b"

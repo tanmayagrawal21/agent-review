@@ -69,3 +69,18 @@ def test_a_skipped_review_is_announced_not_silent():
 def test_a_long_pr_is_warned_about_in_the_review():
     review, _ = build([], {**BUNDLE, "agents": [], "warning": "this is a long PR (3138 changed lines)"})
     assert "> Warning: this is a long PR (3138 changed lines)." in review["body"]
+
+
+def test_throttled_posts_are_retried(monkeypatch):
+    from agent_review import publish
+    calls = []
+
+    def fake(cmd, **kw):
+        calls.append(cmd)
+        if len(calls) == 1:
+            err = "exceeded a secondary rate limit (HTTP 403)"
+            return type("R", (), {"returncode": 1, "stdout": "", "stderr": err})()
+        return type("R", (), {"returncode": 0, "stdout": "{}", "stderr": ""})()
+    monkeypatch.setattr(publish.subprocess, "run", fake)
+    monkeypatch.setattr(publish.time, "sleep", lambda s: None)
+    assert publish.gh("repos/x/pulls/1/reviews", "--method", "POST", payload={}) == "{}" and len(calls) == 2

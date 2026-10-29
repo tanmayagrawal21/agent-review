@@ -14,7 +14,7 @@ def test_every_line_is_redacted_whole_and_fictional_values_are_skipped():
     items = [("app.py", "from django import x"), ("app.py", 'OWNER = "Priya Ramanathan"  # contact'),
              ("t.py", 'u = {"n": "Jane Doe", "e": "jane@example.com"}'), ("README.md", "Ask Hannah Castellanos")]
     lines, found = pii.process(items, spy)
-    assert "from django import x" in seen and not any("Jane Doe" in t or "jane@example.com" in t for t in seen)
+    assert "from django import x" in seen
     assert lines[1] == 'OWNER = "[GIVEN_NAME_1]"  # contact' and lines[3] == "Ask [GIVEN_NAME_1]"
     assert found[1]["labels"] == ["GIVEN_NAME"] and found[3]["labels"] == ["GIVEN_NAME"]
 
@@ -87,3 +87,18 @@ def test_a_name_split_into_two_placeholders_counts_as_several_words():
                  ["GIVEN_NAME", "SURNAME"] if "Priya" in t else []) for t in texts]
     _, found = pii.process([("a.lua", "x = [[Priya Ramanathan]]")], split)
     assert found[0]["labels"] == ["GIVEN_NAME", "SURNAME"]
+
+
+def test_numbers_and_emails_around_fakes_still_reach_the_redactor():
+    seen = []
+    lines = ["card 4000 0555 0123 0000", "+44 20 7555 0123", "acct 98765550123", "priya.r@qa.test.acmecorp.com",
+             "priya@example.com.au"]
+    pii.process([("a.md", ln) for ln in lines], lambda t: (seen.extend(t), model(t))[1])
+    assert seen == lines  # every line goes to the redactor whole; fakes are only exempt from findings
+
+
+def test_fictional_values_are_not_reported_and_source_placeholders_are_ignored():
+    def tag(texts):
+        return [(t.replace("Jane Doe", "[GIVEN_NAME_1]"), ["GIVEN_NAME"] if "Jane Doe" in t else []) for t in texts]
+    _, found = pii.process([("t.py", 'u = "Jane Doe"'), ("t.py", 'x = "[SSN_1]"')], tag)
+    assert found[0]["labels"] == [] and found[1]["labels"] == []

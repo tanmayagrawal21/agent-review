@@ -48,6 +48,12 @@ def parse(text: str) -> dict:
     raw = yaml.safe_load(text) if text.strip() else None
     if raw is not None and not isinstance(raw, dict):
         raise ConfigError("config must be a mapping")
+    for k in ("agents", "skip"):
+        if raw and k in raw and not isinstance(raw[k], dict):
+            raise ConfigError(f"{k} must be a mapping")
+    for name, v in ((raw or {}).get("agents") or {}).items():
+        if not isinstance(v, dict):
+            raise ConfigError(f"agents.{name} must be a mapping")
     cfg = _merge(DEFAULTS, raw or {})
     if cfg["api"] not in ("openai", "anthropic"):
         raise ConfigError("api must be openai or anthropic")
@@ -58,9 +64,10 @@ def parse(text: str) -> dict:
     if cfg["model"] and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}", str(cfg["model"])):
         raise ConfigError("model must be a plain model name")
     for k in ("warn_changed_lines", "max_context_chars"):
-        if not isinstance(cfg[k], int) or cfg[k] < 0:
+        if isinstance(cfg[k], bool) or not isinstance(cfg[k], int) or cfg[k] < 0:
             raise ConfigError(f"{k} must be a non-negative integer")
-    if not isinstance(cfg["skip"]["max_changed_lines"], int) or cfg["skip"]["max_changed_lines"] < 0:
+    mcl = cfg["skip"]["max_changed_lines"]
+    if isinstance(mcl, bool) or not isinstance(mcl, int) or mcl < 0:
         raise ConfigError("skip.max_changed_lines must be a non-negative integer")
     for name in AGENTS:
         if not isinstance(cfg["agents"][name].get("paths", []), list):

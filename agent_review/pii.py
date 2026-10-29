@@ -82,7 +82,8 @@ def replaced(orig: str, red: str) -> list[tuple[int, int, str]]:
     """(start, end, label) of each original span replaced by a placeholder. The text between placeholders is
     unchanged, so each literal chunk of `red` is found in `orig` in order; what lies between is replaced."""
     out, i_o, i_r = [], 0, 0
-    marks = list(PLACE.finditer(red))
+    already = set(PLACE.findall(orig))  # placeholder-shaped text that was in the source is not a detection
+    marks = [m for m in PLACE.finditer(red) if m.group(1) not in already]
     for n, m in enumerate(marks):
         before = red[i_r:m.start()]
         start = orig.find(before, i_o) + len(before) if before else i_o
@@ -93,21 +94,6 @@ def replaced(orig: str, red: str) -> list[tuple[int, int, str]]:
         out.append((start, end, m.group(1)))
         i_o, i_r = end, m.end()
     return out
-
-
-def pieces(line: str, a: int, b: int) -> list[tuple[int, int]]:
-    """Sub-ranges of [a, b) outside fictional fixtures, worth classifying (words, or ID-length numbers)."""
-    out, cur = [], a
-    for m in FICTIONAL.finditer(line, a, b):
-        out.append((cur, m.start()))
-        cur = m.end()
-    out.append((cur, b))
-    keep = []
-    for x, y in out:
-        t = line[x:y].strip()
-        if len(t) >= 3 and (any(c.isalpha() for c in t) or sum(c.isdigit() for c in t) >= 7):
-            keep.append((x, y))
-    return keep
 
 
 def run_model(texts: list[str]) -> list[tuple[str, list[str]]]:
@@ -138,7 +124,7 @@ def process(items: list[tuple[str, str]], run=run_model) -> tuple[list[str], lis
                 text = pat.sub("[SECRET]", text)
         lines.append(text)
         found.append(hit)
-    segs = [(i, x, y) for i, line in enumerate(lines) for x, y in pieces(line, 0, len(line))]
+    segs = [(i, 0, len(line)) for i, line in enumerate(lines) if line.strip()]  # every line, whole
     results = run([lines[i][x:y] for i, x, y in segs])
     original = list(lines)
     for (i, x, y), (new, labels) in sorted(zip(segs, results, strict=True), key=lambda s: (s[0][0], -s[0][1])):
@@ -151,7 +137,7 @@ def process(items: list[tuple[str, str]], run=run_model) -> tuple[list[str], lis
             else:
                 groups.append([a, b, [lb]])
         found[i]["labels"] += [lb for a, b, lbs in groups if reportable(items[i][0], original[i], x + a, x + b)
-                               for lb in lbs]
+                               and not FICTIONAL.fullmatch(orig[a:b].strip()) for lb in lbs]
         lines[i] = lines[i][:x] + new.replace("\n", " ") + lines[i][y:]  # right to left keeps offsets valid
     return lines, found
 

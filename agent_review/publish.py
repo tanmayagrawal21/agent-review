@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 from . import pii
@@ -117,12 +118,22 @@ def build(rs: list[dict], bundle: dict) -> tuple[dict, bool]:
     return {"commit_id": bundle["head"], "event": "COMMENT", "body": body[:MAX_BODY], "comments": comments}, failed
 
 
-def gh(*args: str, payload: dict | None = None) -> str:
-    r = subprocess.run(["gh", "api", *args, *(["--input", "-"] if payload is not None else [])],
-                       input=json.dumps(payload) if payload is not None else None, capture_output=True, text=True)
-    if r.returncode:
-        raise RuntimeError(r.stderr.strip()[:500])
-    return r.stdout
+THROTTLED = ("secondary rate limit", "rate limit exceeded", "abuse detection")
+
+
+def gh(*args: str, payload: dict | None = None, waits: tuple[int, ...] = (60, 120, 240)) -> str:
+    """`gh api`, retrying when GitHub throttles (a 403/429 'secondary rate limit' is temporary)."""
+    for wait in (*waits, None):
+        r = subprocess.run(["gh", "api", *args, *(["--input", "-"] if payload is not None else [])],
+                           input=json.dumps(payload) if payload is not None else None, capture_output=True, text=True)
+        if r.returncode == 0:
+            return r.stdout
+        throttled = any(t in r.stderr.lower() for t in THROTTLED)
+        if not throttled or wait is None:
+            raise RuntimeError(r.stderr.strip()[:500])
+        print(f"GitHub is throttling; retrying in {wait}s")
+        time.sleep(wait)
+    raise AssertionError("unreachable")
 
 
 def post(repo: str, pr: int, review: dict) -> None:
@@ -132,7 +143,9 @@ def post(repo: str, pr: int, review: dict) -> None:
            and rv.get("commit_id") != review["commit_id"]]
     try:
         gh(base, "--method", "POST", payload=review)
-    except RuntimeError:  # a line GitHub will not anchor: put everything in the body
+    except RuntimeError as e:  # a line GitHub will not anchor (422): put everything in the body
+        if any(t in str(e).lower() for t in THROTTLED):
+            raise
         extra = "\n".join(f"- `{c['path']}:{c['line']}` {c['body']}" for c in review["comments"])
         body = (review["body"] + "\n\n### Inline findings\n" + extra)[:MAX_BODY]
         gh(base, "--method", "POST", payload={**review, "comments": [], "body": body})
