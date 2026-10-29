@@ -19,8 +19,12 @@ from pathlib import Path
 
 JS = Path(__file__).resolve().parent / "js"
 PROSE = "PR.md"  # path used for the title, description and commit messages
-TEXT_SUFFIXES = {".md", ".txt", ".rst", ".csv", ".tsv", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".env",
-                 ".xml", ".html", ".htm", ".log", ".sql", ".properties", ""}
+# Source code: only string literals and comments are classified. Every other file (docs, data, config, .vcf,
+# .eml, unknown types) is classified whole-line, so an unrecognised format can't slip personal data through.
+CODE_SUFFIXES = {".py", ".pyi", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java", ".kt", ".kts",
+                 ".scala", ".groovy", ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".cs", ".fs", ".rb", ".php", ".swift",
+                 ".m", ".mm", ".dart", ".lua", ".pl", ".r", ".jl", ".ex", ".exs", ".erl", ".hs", ".clj", ".elm",
+                 ".vue", ".svelte", ".sh", ".bash", ".zsh", ".fish", ".ps1"}
 
 SECRETS = [(name, re.compile(p)) for name, p in [
     ("Anthropic API key", r"sk-ant-[A-Za-z0-9_-]{20,}"),
@@ -52,12 +56,15 @@ KEEP = {"URL", "CITY", "STATE", "ZIP_CODE"}  # not identifying on their own; lef
 
 def spans(path: str, line: str) -> list[tuple[int, int]]:
     """Character ranges of `line` the model classifies."""
-    if Path(path).suffix.lower() in TEXT_SUFFIXES:
+    if Path(path).suffix.lower() not in CODE_SUFFIXES:
         return [(0, len(line))] if line.strip() else []
-    out = [(m.start(g), m.end(g)) for m in STRINGS.finditer(line) for g in (1, 2, 3) if m.group(g)]
     blanked = STRINGS.sub(lambda m: " " * len(m.group(0)), line)  # comment markers inside strings don't count
-    if (m := COMMENT.search(blanked)) and m.group(1).strip():
-        out.append((m.start(1), m.end(1)))
+    comment = COMMENT.search(blanked)
+    start = comment.start(1) if comment else len(line)
+    out = [(m.start(g), m.end(g)) for m in STRINGS.finditer(line) for g in (1, 2, 3)
+           if m.group(g) and m.end(g) <= start]  # strings inside the comment are covered by the comment span
+    if comment and line[start:].strip():
+        out.append((start, len(line)))
     return out
 
 
