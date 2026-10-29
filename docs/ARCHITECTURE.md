@@ -55,7 +55,7 @@ flowchart TD
 | job | can read | can't read | GitHub permission |
 |---|---|---|---|
 | ① prepare | the PR checkout | the model API key | `contents: read` |
-| ② review × N | `bundle.json` (redacted), the model API key | the code, any token | `contents: read`, no token passed |
+| ② review × N | `bundle.json` (redacted); the endpoint, model and key secrets | the code, any token | `contents: read`, no token passed |
 | ③ publish | `bundle.json`, the agents' findings | the model API key, the code | `pull-requests: write` |
 
 ---
@@ -67,8 +67,9 @@ flowchart TD
 1. **Config at the base commit.** It reads `git show <base>:.github/agent-review.yml`, so a PR that edits
    the config changes nothing until it is merged. A missing file means defaults; unknown keys are an error.
 2. **Who runs.** An agent runs if it is enabled, if its `paths` globs match a changed file (`[]` means every
-   PR), and if a model is configured (`model`, a `base_url` or the `AGENT_REVIEW_BASE_URL` secret, and the
-   `AGENT_REVIEW_API_KEY` secret). Drafts and PRs over `skip.max_changed_lines` are skipped. The privacy
+   PR), and if a model is configured. That takes the secrets `AGENT_REVIEW_API_KEY`, `AGENT_REVIEW_BASE_URL`
+   and `AGENT_REVIEW_MODEL`. The endpoint and model are secrets rather than config, so which provider a repo
+   uses never appears in the public repository; `base_url` and `model` in the config are only a fallback. Drafts and PRs over `skip.max_changed_lines` are skipped. The privacy
    agent's local half needs no key, so it always runs.
 3. **One local pass** (`agent_review/pii.py`) over every line of the diff, the changed files, the title, the
    description and the commit messages:
@@ -90,6 +91,10 @@ flowchart TD
    - **Rampart** runs once per PR on the runner. One batch means the same value gets the same placeholder
      everywhere. The node process gets no credentials.
    - **Line structure is preserved,** so line numbers in the redacted text match the real files.
+   - **Hunk headers are cut** to their line ranges. Git appends a nearby source line to each `@@` header,
+     and that text would otherwise bypass redaction.
+   - **File paths are not redacted.** They appear in the PR on GitHub anyway; don't put personal data in
+     file names.
    - **It fails closed:** if the model can't run, prepare fails and nothing is sent anywhere.
 4. **Size guard.** If the redacted diff is over `max_context_chars`, the model agents don't run: a partial
    review could miss the real change. That counts as a gap.
@@ -97,8 +102,8 @@ flowchart TD
    which gets no secrets, or an over-size diff). Otherwise it is a notice.
 
 `bundle.json` holds the redacted diff, files, title, description and commits; the local findings; the agent
-list; and the non-secret config (`api`, `base_url`, `model`, `instructions`, `max_context_chars`,
-`blocking`).
+list; and the non-secret config. It never contains the key, the endpoint or the model from the secrets. It is
+kept for one day.
 
 ---
 
@@ -122,7 +127,8 @@ sequenceDiagram
     R-->>R: findings-<agent>.json (its own artifact)
 ```
 
-- **One engine, two wire formats.** `api: openai` is any OpenAI-compatible chat-completions endpoint:
+- **One engine, two wire formats.** The endpoint and model come from secrets. `api: openai` is any
+  OpenAI-compatible chat-completions endpoint:
   OpenAI, Gemini, OpenRouter, Mistral, Groq, Together, Ollama, vLLM and others. `api: anthropic` is
   Anthropic's Messages API. Redirects are refused, so the key is never resent elsewhere. `base_url` must be
   https, or http on localhost.
@@ -172,9 +178,14 @@ sequenceDiagram
 | the model provider | sees redacted text only | raw personal data or provider-format keys |
 | maintainers | the config and the secrets | — |
 
-One caveat: on `pull_request`, the calling workflow file comes from the PR, so a PR can edit
-`.github/workflows/agent-review.yml` itself. Protect `.github/workflows/` with CODEOWNERS and required
-reviews.
+Two caveats:
+
+- On `pull_request`, the calling workflow file comes from the PR, so a PR can edit
+  `.github/workflows/agent-review.yml` itself. Protect `.github/workflows/` with CODEOWNERS and required
+  reviews.
+- This repository reviews its own PRs with the PR's own code (`self-review.yml`), so a PR here can change the
+  redactor that guards its own review. That's acceptable only because same-repo PRs come from people with
+  write access; fork PRs get no secrets. Other repositories pin a released tag instead.
 
 ---
 
