@@ -93,3 +93,9 @@ def test_anthropic_host_is_detected_and_no_temperature_is_sent():
     o, calls = opener({"choices": [{"message": {"content": json.dumps(OK)}}]})
     review.run("reviewer", BUNDLE, "k", o)
     assert "temperature" not in calls[0][2]
+
+
+def test_verdict_is_found_in_prose_that_contains_braces():
+    from agent_review.llm import extract
+    reply = "Checked `cfg = {**a}` and `{x}`.\n```json\n" + json.dumps(OK) + "\n```\nAlso see {notes}."
+    assert extract(reply)["verdict"] == "approve"

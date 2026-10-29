@@ -26,16 +26,21 @@ _open = urllib.request.build_opener(_NoRedirect).open
 
 
 def extract(content: str) -> dict | None:
-    """A JSON object from a reply, bare or wrapped in prose or a code fence."""
-    try:
-        d = json.loads(content)
-    except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", content, re.S)
+    """The JSON object in a reply: bare, fenced, or surrounded by prose that may itself contain braces. Prefers
+    an object with a "verdict"."""
+    dec, found = json.JSONDecoder(), []
+    for i, ch in enumerate(content):
+        if ch != "{":
+            continue
         try:
-            d = json.loads(m.group(0)) if m else None
+            d, _ = dec.raw_decode(content, i)
         except json.JSONDecodeError:
-            return None
-    return d if isinstance(d, dict) else None
+            continue
+        if isinstance(d, dict):
+            if "verdict" in d:
+                return d
+            found.append(d)
+    return found[0] if found else None
 
 
 def _post(url: str, body: dict, headers: dict, opener, timeout: int) -> dict:
