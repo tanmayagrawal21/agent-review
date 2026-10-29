@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 from . import llm, pii
 
@@ -95,7 +96,8 @@ def run(agent: str, b: dict, key: str, opener=None) -> dict:
     system, user = brief(agent, b)
     r = llm.call(cfg, key, system, user, SCHEMA, **({"opener": opener} if opener else {}))
     res = normalise(agent, b["head"], r["structured"], r["tokens"], r["error"])
-    secrets = [v for v in (key, os.environ.get(BASE_URL_ENV, ""), os.environ.get(MODEL_ENV, "")) if len(v) >= 4]
+    url = os.environ.get(BASE_URL_ENV, "")
+    secrets = [v for v in (key, url, urlparse(url).hostname or "", os.environ.get(MODEL_ENV, "")) if len(v) >= 4]
     return json.loads(pii.scrub(json.dumps(res), [json.dumps(s)[1:-1] for s in secrets]))
 
 

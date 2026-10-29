@@ -24,7 +24,7 @@ PROSE = "PR.md"  # path used for the title, description and commit messages
 CODE_SUFFIXES = {".py", ".pyi", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java", ".kt", ".kts",
                  ".scala", ".groovy", ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".cs", ".fs", ".rb", ".php", ".swift",
                  ".m", ".mm", ".dart", ".lua", ".pl", ".r", ".jl", ".ex", ".exs", ".erl", ".hs", ".clj", ".elm",
-                 ".vue", ".svelte", ".sh", ".bash", ".zsh", ".fish", ".ps1"}
+                 ".vue", ".svelte"}  # shell scripts are text: their arguments are bare words
 
 SECRETS = [(name, re.compile(p)) for name, p in [
     ("Anthropic API key", r"sk-ant-[A-Za-z0-9_-]{20,}"),
@@ -54,9 +54,43 @@ REVIEW = {"GIVEN_NAME": "name", "SURNAME": "name", "EMAIL": "email address", "PH
 KEEP = {"URL", "CITY", "STATE", "ZIP_CODE"}  # not identifying on their own; left visible to reviewers
 
 
-def spans(path: str, line: str) -> list[tuple[int, int]]:
-    """Character ranges of `line` the model classifies."""
+BLOCKS = (('"""', '"""'), ("'''", "'''"), ("/*", "*/"), ("`", "`"), ("<!--", "-->"))
+
+
+def block_lines(path: str, text: str) -> set[int]:
+    """1-based lines of a code file that are inside (or open or close) a multi-line string or comment: those
+    lines are classified whole, like text."""
     if Path(path).suffix.lower() not in CODE_SUFFIXES:
+        return set()
+    out, close = set(), None
+    for n, line in enumerate(text.split("\n"), 1):
+        i, touched = 0, close is not None
+        while i <= len(line):
+            if close:
+                j = line.find(close, i)
+                if j < 0:
+                    break
+                i, close = j + len(close), None
+                continue
+            opens = [(k, o, c) for o, c in BLOCKS if (k := line.find(o, i)) >= 0]
+            if not opens:
+                break
+            k, o, c = min(opens)
+            j = line.find(c, k + len(o))
+            if j >= 0:
+                i = j + len(c)  # opened and closed on this line: the per-line rules cover it
+                continue
+            close, touched = c, True
+            break
+        if touched or close:
+            out.add(n)
+    return out
+
+
+def spans(path: str, line: str, whole: bool = False) -> list[tuple[int, int]]:
+    """Character ranges of `line` the model classifies. `whole`: the line is inside a multi-line string or
+    comment (or its context is unknown), so all of it is."""
+    if whole or Path(path).suffix.lower() not in CODE_SUFFIXES:
         return [(0, len(line))] if line.strip() else []
     blanked = STRINGS.sub(lambda m: " " * len(m.group(0)), line)  # comment markers inside strings don't count
     comment = COMMENT.search(blanked)
@@ -99,11 +133,12 @@ def run_model(texts: list[str]) -> list[tuple[str, list[str]]]:
     return [by_id[i] for i in range(len(texts))]
 
 
-def process(items: list[tuple[str, str]], run=run_model) -> tuple[list[str], list[dict]]:
-    """Redact (path, line) pairs in one batch. Returns the redacted lines and, per line, what was found:
-    {"secrets": [names], "labels": [Rampart labels]}."""
+def process(items: list[tuple], run=run_model) -> tuple[list[str], list[dict]]:
+    """Redact (path, line[, whole]) items in one batch. Returns the redacted lines and, per line, what was
+    found: {"secrets": [names], "labels": [Rampart labels]}."""
+    items = [(it[0], it[1], it[2] if len(it) > 2 else False) for it in items]
     lines, found = [], []
-    for _, text in items:
+    for _, text, _ in items:
         hit = {"secrets": [], "labels": []}
         for name, pat in SECRETS:
             if pat.search(text):
@@ -111,7 +146,7 @@ def process(items: list[tuple[str, str]], run=run_model) -> tuple[list[str], lis
                 text = pat.sub("[SECRET]", text)
         lines.append(text)
         found.append(hit)
-    segs = [(i, x, y) for i, (path, _) in enumerate(items) for a, b in spans(path, lines[i])
+    segs = [(i, x, y) for i, (path, _, whole) in enumerate(items) for a, b in spans(path, lines[i], whole)
             for x, y in pieces(lines[i], a, b)]
     results = run([lines[i][x:y] for i, x, y in segs])
     for (i, x, y), (new, labels) in sorted(zip(segs, results, strict=True), key=lambda s: (s[0][0], -s[0][1])):

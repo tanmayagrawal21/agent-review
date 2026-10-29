@@ -60,13 +60,15 @@ def build(repo: Path, base: str, head: str, cfg: dict, plan: dict, title: str, b
     files, _ = changed(repo, base, head)
     texts = text_files(repo, head, files)
     rows = list(walk(diff))
-    items = [(f, t) for f, kind, _, t in rows if kind != "meta"]  # diff content lines first, in order
+    blocks = {f: pii.block_lines(f, text) for f, text in texts.items()}
+    # removed lines have no head context: classify them whole; others are whole inside multi-line blocks
+    items = [(f, t, kind == "-" or n in blocks.get(f, ())) for f, kind, n, t in rows if kind != "meta"]
     ranges: dict[str, tuple[int, int]] = {}
 
     def add(key: str, path: str, text: str) -> None:
-        lines = text.split("\n")
+        lines, inside = text.split("\n"), blocks.get(path, set())
         ranges[key] = (len(items), len(items) + len(lines))
-        items.extend((path, ln) for ln in lines)
+        items.extend((path, ln, n in inside) for n, ln in enumerate(lines, 1))
 
     for key, text in (("title", title), ("body", body), ("log", log)):
         add(key, pii.PROSE, text)

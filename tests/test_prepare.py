@@ -91,3 +91,14 @@ def test_hunk_header_context_never_reaches_the_bundle(repo):
     assert "Ramanathan" in git(r, "diff", f"{mid}...{head}")  # git put it in the @@ header
     b = build(r, mid, head, CFG, decide(CFG, ["data.csv"], 1, False, True), "", "", run=model)
     assert "Ramanathan" not in b["diff"] and "Priya" not in b["diff"]
+
+
+def test_a_docstring_fixture_is_redacted_in_the_diff_and_the_file(repo):
+    r, base, _ = repo
+    (r / "fx.py").write_text('DATA = """\nPriya Ramanathan, 472-81-0094\n"""\n')
+    git(r, "add", "-A")
+    git(r, "commit", "-qm", "fixture")
+    head = git(r, "rev-parse", "HEAD")
+    b = build(r, base, head, CFG, decide(CFG, ["fx.py"], 3, False, True), "", "", run=model)
+    assert "Ramanathan" not in b["diff"] and "Ramanathan" not in b["files"]["fx.py"] and "472-81" not in b["diff"]
+    assert any(f["file"] == "fx.py" and f["severity"] == "blocking" for f in b["local_findings"])

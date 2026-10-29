@@ -68,3 +68,13 @@ def test_unknown_formats_are_whole_line_and_spans_never_overlap():
     lines, _ = pii.process([("a.py", line), ("a.py", 'x = "Priya Ramanathan"  # and "Priya Ramanathan"')], model)
     assert lines[0] == '# hi "[GIVEN_NAME_1]" ok'
     assert lines[1] == 'x = "[GIVEN_NAME_1]"  # and "[GIVEN_NAME_1]"'
+
+
+def test_lines_inside_multiline_strings_and_comments_are_classified_whole():
+    src = 'X = 1\nFIXTURE = """\nPriya Ramanathan, 415-555-1234\n"""\n/* Hannah Castellanos\nstill comment */\ny = 2\n'
+    inside = pii.block_lines("a.py", src)
+    assert inside == {2, 3, 4, 5, 6}
+    assert pii.spans("a.py", "Priya Ramanathan, 415-555-1234") == []  # alone, a code line looks like code...
+    lines, found = pii.process([("a.py", "Priya Ramanathan, 415-555-1234", True)], model)  # ...but not in a block
+    assert lines[0].startswith("[GIVEN_NAME_1]") and found[0]["labels"] == ["GIVEN_NAME"]
+    assert pii.spans("run.sh", "echo Priya") == [(0, 10)]
