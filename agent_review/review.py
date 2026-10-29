@@ -88,6 +88,8 @@ def normalise(agent: str, head: str, so, tokens: dict, error: str | None) -> dic
 
 
 def run(agent: str, b: dict, key: str, opener=None) -> dict:
+    if agent not in b["agents"]:  # prepare decided this agent must not send anything (e.g. an over-size diff)
+        return normalise(agent, b["head"], None, llm.tokens({}), "not scheduled by prepare; nothing sent")
     cfg = {**b["config"], "base_url": os.environ.get(BASE_URL_ENV) or b["config"]["base_url"],
            "model": os.environ.get(MODEL_ENV) or b["config"]["model"]}
     system, user = brief(agent, b)

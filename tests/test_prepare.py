@@ -52,7 +52,7 @@ def test_oversized_diff_is_not_sent(repo):
     cfg = {**CFG, "max_context_chars": 10}
     plan = decide(cfg, ["app.py"], 3, False, True)
     b = build(r, base, head, cfg, plan, "", "", run=model)
-    assert b["agents"] == [] and "max_context_chars" in plan["reason"] and plan["gap"]
+    assert b["agents"] == plan["agents"] == [] and "max_context_chars" in plan["reason"] and plan["gap"]
 
 
 def test_cli_fails_closed_only_in_blocking_mode(repo, tmp_path):

@@ -86,7 +86,8 @@ def build(repo: Path, base: str, head: str, cfg: dict, plan: dict, title: str, b
               "config": {k: cfg[k] for k in ("api", "base_url", "model", "instructions", "max_context_chars",
                                              "blocking")}}
     if plan["agents"] and len(bundle["diff"]) > cfg["max_context_chars"]:
-        bundle["agents"], plan["gap"] = [], sorted(set(plan["gap"]) | set(plan["agents"]))
+        plan["gap"] = sorted(set(plan["gap"]) | set(plan["agents"]))
+        bundle["agents"] = plan["agents"] = []  # the job outputs come from the plan: clear both
         plan["reason"] = f"diff is {len(bundle['diff'])} chars, over max_context_chars: not sent to a model"
     return bundle
 
