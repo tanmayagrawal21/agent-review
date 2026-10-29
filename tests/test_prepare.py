@@ -73,3 +73,17 @@ def test_cli_fails_closed_only_in_blocking_mode(repo, tmp_path):
                           "--head", head2, "--out", str(tmp_path / "c.json")], cwd=ROOT, capture_output=True,
                          text=True, env={"PATH": "/usr/bin:/bin", "HAS_KEY": "false"})
     assert out.returncode == 1 and "::error::" in out.stdout  # enabled agents cannot run: not green
+
+
+def test_hunk_header_context_never_reaches_the_bundle(repo):
+    r, base, _ = repo
+    (r / "data.csv").write_text("".join(f"row{i},x\n" for i in range(8)) + "Priya Ramanathan,4155551234\n" + "z\n" * 6)
+    git(r, "add", "-A")
+    git(r, "commit", "-qm", "data")
+    mid = git(r, "rev-parse", "HEAD")
+    (r / "data.csv").write_text((r / "data.csv").read_text().replace("z\nz\nz\nz\n", "z\nz\nNEW\nz\n", 1))
+    git(r, "commit", "-qam", "edit")
+    head = git(r, "rev-parse", "HEAD")
+    assert "Ramanathan" in git(r, "diff", f"{mid}...{head}")  # git put it in the @@ header
+    b = build(r, mid, head, CFG, decide(CFG, ["data.csv"], 1, False, True), "", "", run=model)
+    assert "Ramanathan" not in b["diff"] and "Priya" not in b["diff"]
