@@ -35,3 +35,14 @@ def test_plan_scopes_and_skips(repo):
     assert decide(cfg, files, lines, False, True)["engine"] == "claude-code"
     api = load_text("base_url: https://api.example.com/v1\nmodel: m\n")
     assert decide(api, files, lines, False, False, has_api=True)["engine"] == "openai-compatible"
+
+
+def test_changed_files_handles_non_ascii_and_renames(repo):
+    from .conftest import git
+    r, base, head = repo
+    (r / "café.py").write_text("x = 1\n")
+    git(r, "mv", "notes.md", "renamed notes.md")
+    git(r, "add", "-A")
+    git(r, "commit", "-qm", "more")
+    files, _ = changed(r, base, git(r, "rev-parse", "HEAD"))
+    assert "café.py" in files and "renamed notes.md" in files

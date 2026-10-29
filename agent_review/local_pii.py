@@ -94,8 +94,9 @@ def result(agent: str, head: str, diff: str) -> dict:
         fs = findings(diff)
     except (RuntimeError, OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as e:
         return {"agent": agent, "sha": head, "status": "error", "verdict": None, "summary": "", "findings": [],
-                "cost_usd": 0.0, "error": str(e)[:300]}
+                "engine": "local", "tokens": {"input": 0, "cached": 0, "output": 0}, "error": str(e)[:300]}
     blocking = sum(f["severity"] == "blocking" for f in fs)
     return {"agent": agent, "sha": head, "status": "ok", "verdict": "changes" if blocking else "approve",
             "summary": f"Local scan (secret patterns + on-device PII model): {blocking} blocking, "
-                       f"{len(fs) - blocking} to check.", "findings": fs, "cost_usd": 0.0}
+                       f"{len(fs) - blocking} to check.", "findings": fs, "engine": "local",
+            "tokens": {"input": 0, "cached": 0, "output": 0}}

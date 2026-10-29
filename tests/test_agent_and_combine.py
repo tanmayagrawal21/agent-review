@@ -8,7 +8,8 @@ from .conftest import git
 
 
 def _cli(so, **kw):
-    return json.dumps({"is_error": False, "subtype": "success", "total_cost_usd": 0.12, "structured_output": so,
+    return json.dumps({"is_error": False, "subtype": "success", "structured_output": so, "usage": {
+        "input_tokens": 10, "cache_creation_input_tokens": 300, "cache_read_input_tokens": 9000, "output_tokens": 50},
                        **kw})
 
 
@@ -23,7 +24,8 @@ def test_parse_blocking_finding_overrides_an_approve():
     so = {"verdict": "approve", "summary": "ok", "findings": [
         {"file": "a.py", "line": 2, "severity": "blocking", "message": "off by one"}]}
     r = parse("reviewer", "abc", _cli(so), 0)
-    assert (r["status"], r["verdict"], r["cost_usd"]) == ("ok", "changes", 0.12)
+    assert (r["status"], r["verdict"]) == ("ok", "changes")
+    assert r["tokens"] == {"input": 310, "cached": 9000, "output": 50} and r["engine"] == "claude-code"
 
 
 def test_agent_runs_restricted_with_read_tools_only_and_pr_text_is_marked_untrusted():
@@ -103,3 +105,11 @@ def test_anchor_moves_a_misnumbered_finding_to_its_quoted_line():
                  {"file": "m.py", "line": 3, "code": "not there", "severity": "blocking", "message": "m"},
                  {"file": "m.py", "line": 1, "severity": "blocking", "message": "no code"}], lambda p: text)
     assert [f["line"] for f in fs] == [4, 3, 1]  # nearest occurrence; unknown text and no code keep the line
+
+
+def test_summary_table_shows_tokens_per_agent_and_a_total():
+    a = {**_r("reviewer"), "engine": "openai-compatible", "tokens": {"input": 1200, "cached": 0, "output": 300}}
+    b = {**_r("privacy"), "engine": "local", "tokens": {"input": 0, "cached": 0, "output": 0}}
+    body = build([a, b], "", "h" * 40, [])[0]["body"]
+    assert "| openai-compatible | 1,200 / 0 / 300 |" in body and "| local | 0 / 0 / 0 |" in body
+    assert "**1,200 / 0 / 300**" in body and "$" not in body

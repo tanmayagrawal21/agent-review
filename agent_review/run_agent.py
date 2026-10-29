@@ -124,9 +124,26 @@ def scrub(value, secrets: list[str]):
     return value
 
 
-def normalise(agent: str, head: str, so, cost: float = 0.0, error: str | None = None) -> dict:
+ZERO = {"input": 0, "cached": 0, "output": 0}
+
+
+def tokens_from(usage: dict) -> dict:
+    """Token counts in one shape for every engine: fresh input, cached input, output. Tokens, not dollars, are
+    the cost measure: they compare across providers, while prices and plans differ."""
+    if not isinstance(usage, dict):
+        return dict(ZERO)
+    if "prompt_tokens" in usage:  # OpenAI-compatible
+        cached = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
+        return {"input": int(usage.get("prompt_tokens") or 0) - cached, "cached": cached,
+                "output": int(usage.get("completion_tokens") or 0)}
+    return {"input": int(usage.get("input_tokens") or 0) + int(usage.get("cache_creation_input_tokens") or 0),
+            "cached": int(usage.get("cache_read_input_tokens") or 0), "output": int(usage.get("output_tokens") or 0)}
+
+
+def normalise(agent: str, head: str, so, tokens: dict | None = None, error: str | None = None,
+              engine: str = "") -> dict:
     out = {"agent": agent, "sha": head, "status": "error", "verdict": None, "summary": "", "findings": [],
-           "cost_usd": cost}
+           "engine": engine, "tokens": tokens or dict(ZERO)}
     if error or not isinstance(so, dict) or so.get("verdict") not in ("approve", "changes"):
         return {**out, "error": error or "no structured verdict"}
     findings = [f for f in so.get("findings") or [] if isinstance(f, dict) and f.get("message")]
@@ -139,12 +156,12 @@ def parse(agent: str, head: str, stdout: str, returncode: int) -> dict:
     try:
         d = json.loads(stdout)
     except json.JSONDecodeError:
-        return normalise(agent, head, None, error=f"CLI exited {returncode} without JSON output")
-    cost = float(d.get("total_cost_usd") or 0)
+        return normalise(agent, head, None, error=f"CLI exited {returncode} without JSON output", engine="claude-code")
+    tokens = tokens_from(d.get("usage"))
     if d.get("is_error"):
         why = str(d.get("result") or d.get("subtype") or "unknown")[:200]
-        return normalise(agent, head, None, cost, f"no structured verdict: {why}")
-    return normalise(agent, head, d.get("structured_output"), cost)
+        return normalise(agent, head, None, tokens, f"no structured verdict: {why}", "claude-code")
+    return normalise(agent, head, d.get("structured_output"), tokens, engine="claude-code")
 
 
 def run_claude(a, cfg: dict, env: dict, peers) -> dict:
@@ -166,7 +183,7 @@ def run_api(a, cfg: dict, peers, opener=None) -> dict:
     git = lambda *args: subprocess.run(["git", "-C", str(a.repo), *args], check=True, capture_output=True,  # noqa: E731
                                        text=True).stdout
     diff = git("diff", f"{a.base}...{a.head}")
-    files = [f for f in git("diff", "--name-only", "--diff-filter=AMR", f"{a.base}...{a.head}").splitlines() if f]
+    files = [f for f in git("diff", "-z", "--name-only", "--diff-filter=AMR", f"{a.base}...{a.head}").split("\0") if f]
     budget = int(cfg["max_context_chars"])
     if len(diff) > budget:  # never review a truncated diff: the hidden part could be the real change
         return normalise(a.agent, a.head, None, error=f"diff is {len(diff)} chars, over max_context_chars; "
@@ -178,9 +195,7 @@ def run_api(a, cfg: dict, peers, opener=None) -> dict:
     system, _, user = prompt.partition("\n---\n")
     r = llm_api.call(cfg["base_url"], cfg["model"], os.environ.get(llm_api.KEY_ENV, ""), system, user, SCHEMA,
                      **({"opener": opener} if opener else {}))
-    res = normalise(a.agent, a.head, r["structured"], 0.0, r["error"])
-    res["usage"] = {k: r["usage"].get(k) for k in ("prompt_tokens", "completion_tokens") if k in r["usage"]}
-    return res
+    return normalise(a.agent, a.head, r["structured"], tokens_from(r["usage"]), r["error"], "openai-compatible")
 
 
 def merge(agent: str, head: str, parts: list[dict]) -> dict:
@@ -188,9 +203,13 @@ def merge(agent: str, head: str, parts: list[dict]) -> dict:
     ok = [p for p in parts if p["status"] == "ok"]
     if len(ok) < len(parts):  # not approved, but what the working half found is still shown
         bad = next(p for p in parts if p["status"] != "ok")
-        return {**bad, "agent": agent, "sha": head, "findings": [f for p in ok for f in p["findings"]]}
+        return {**bad, "agent": agent, "sha": head, "findings": [f for p in ok for f in p["findings"]],
+                "tokens": {k: sum(p.get("tokens", ZERO)[k] for p in parts) for k in ZERO},
+                "engine": "+".join(p.get("engine", "") for p in parts)}
     fs = [f for p in ok for f in p["findings"]]
-    return {"agent": agent, "sha": head, "status": "ok", "findings": fs, "cost_usd": sum(p["cost_usd"] for p in ok),
+    tokens = {k: sum(p.get("tokens", ZERO)[k] for p in parts) for k in ZERO}
+    return {"agent": agent, "sha": head, "status": "ok", "findings": fs, "tokens": tokens,
+            "engine": "+".join(p.get("engine", "") for p in parts),
             "verdict": "changes" if any(p["verdict"] == "changes" for p in ok) else "approve",
             "summary": " ".join(p["summary"] for p in ok)}
 
