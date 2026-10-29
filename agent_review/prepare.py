@@ -105,11 +105,15 @@ def main() -> int:
     files, lines = changed(a.repo, a.base, a.head)
     plan = decide(cfg, files, lines, a.draft == "true", os.environ.get("HAS_KEY") == "true",
                   os.environ.get("HAS_BASE_URL") == "true", os.environ.get("HAS_MODEL") == "true")
-    run = bool(plan["agents"] or plan["local"])
+    run = bool(plan["agents"] or plan["local"] or plan["gap"])  # a skipped review still says so on the PR
     if run:
-        bundle = build(a.repo, a.base, a.head, cfg, plan, os.environ.get("PR_TITLE", ""),
-                       os.environ.get("PR_BODY", ""))
-        bundle["privacy"] = plan["local"]
+        if plan["agents"] or plan["local"]:
+            bundle = build(a.repo, a.base, a.head, cfg, plan, os.environ.get("PR_TITLE", ""),
+                           os.environ.get("PR_BODY", ""))
+        else:  # nothing may run (e.g. too large): a bundle that carries only the reason, no PR content
+            bundle = {"base": a.base, "head": a.head, "agents": [], "redacted": True, "diff": "", "files": {},
+                      "local_findings": [], "config": {"blocking": cfg["blocking"]}}
+        bundle["privacy"], bundle["notice"] = plan["local"], plan["reason"]
         a.out.parent.mkdir(parents=True, exist_ok=True)
         a.out.write_text(json.dumps(bundle))
     print(json.dumps({k: plan[k] for k in ("agents", "local", "gap", "reason")}))

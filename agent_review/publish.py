@@ -99,6 +99,11 @@ def build(rs: list[dict], bundle: dict) -> tuple[dict, bool]:
     comments = [{"path": p, "line": n, "side": "RIGHT",
                  "body": _item(*items[0]) if len(items) == 1 else "\n".join(f"- {_item(a, f)}" for a, f in items)}
                 for (p, n), items in by_line.items()]
+    if not rs:  # nothing could run: say why instead of staying silent
+        head = head[:2] + ["", f"**Not reviewed:** {bundle.get('notice') or 'no agent could run'}."]
+        failed = True
+    elif bundle.get("notice"):
+        head += ["", f"> Note: {bundle['notice']}."]
     body = "\n".join(head)
     for r in rs:
         body += f"\n\n### {TITLES[r['agent']]}\n" + (r["summary"] if r["status"] == "ok" else
