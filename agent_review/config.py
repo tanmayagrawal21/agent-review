@@ -25,7 +25,8 @@ DEFAULTS: dict = {
     "redact": True,  # every text passes through the local PII model before any model sees it
     "blocking": False,  # true: the check fails when an agent requests changes, errors, or cannot run
     "max_context_chars": 150_000,  # diff + changed files sent to the model; a larger diff is not reviewed
-    "skip": {"draft": True, "max_changed_lines": 2000},
+    "warn_changed_lines": 1000,  # a longer PR gets a note in the review (0 = never)
+    "skip": {"draft": True, "max_changed_lines": 0},  # 0 = no limit; set one to skip very large PRs
     "instructions": "",  # notes for every agent about this codebase
 }
 

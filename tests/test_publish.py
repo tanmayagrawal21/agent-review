@@ -64,3 +64,8 @@ def test_a_skipped_review_is_announced_not_silent():
          "config": {"blocking": False}, "notice": "3138 changed lines exceeds skip.max_changed_lines"}
     review, failed = build(results(b, Path("/nonexistent")), b)
     assert "**Not reviewed:** 3138 changed lines" in review["body"] and review["comments"] == [] and failed
+
+
+def test_a_long_pr_is_warned_about_in_the_review():
+    review, _ = build([], {**BUNDLE, "agents": [], "warning": "this is a long PR (3138 changed lines)"})
+    assert "> Warning: this is a long PR (3138 changed lines)." in review["body"]
