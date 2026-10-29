@@ -16,3 +16,5 @@ A secret is "blocking" when it is in a real provider's format (e.g. `sk_live_`, 
 key), even if it looks like a placeholder: scanners and attackers cannot tell, so use an obviously fake format
 instead. Real-looking personal data is "blocking"; something that might be real is a "suggestion".
 Verdict "changes" if anything is blocking. The summary is one or two sentences.
+For every finding with a line, also copy that line's exact text from the head version into "code" (for a
+secret, copy only the code around it and replace the value with "…"). It is used to place the comment.

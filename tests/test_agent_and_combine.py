@@ -1,6 +1,6 @@
 import json
 
-from agent_review.combine import build, commentable, group, scanner_result
+from agent_review.combine import anchor, build, commentable, group, scanner_result
 from agent_review.config import load_text
 from agent_review.run_agent import brief, command, context, lanes, parse, scrub
 
@@ -95,3 +95,11 @@ def test_lanes_name_what_others_own_and_hand_disabled_lanes_to_the_reviewer():
     assert solo.count("you also cover") == 2 and "secrets" in solo and "controls" in solo
     assert "you also cover" not in lanes("safety", ["safety"])  # only the reviewer absorbs a missing lane
     assert "Other agents on this PR" in brief("reviewer", load_text(""), "b", "h", "", "", ["reviewer", "privacy"])
+
+
+def test_anchor_moves_a_misnumbered_finding_to_its_quoted_line():
+    text = "x = 1\nif a <= b:\n    pass\nif a <= b:\n"
+    fs = anchor([{"file": "m.py", "line": 5, "code": "if a <= b:", "severity": "blocking", "message": "m"},
+                 {"file": "m.py", "line": 3, "code": "not there", "severity": "blocking", "message": "m"},
+                 {"file": "m.py", "line": 1, "severity": "blocking", "message": "no code"}], lambda p: text)
+    assert [f["line"] for f in fs] == [4, 3, 1]  # nearest occurrence; unknown text and no code keep the line

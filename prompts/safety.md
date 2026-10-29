@@ -16,3 +16,5 @@ environment variable, config value or argument that can raise a limit or switch 
 or allowlist is blocking, even if the intent is "configurability": overrides may only tighten, or must be bounded.
 Other concerns are "suggestion". If the PR touches no control, approve with no findings and say so in the
 summary. Verdict "changes" if anything is blocking.
+For every finding with a line, also copy that line's exact text from the head version into "code" (for a
+secret, copy only the code around it and replace the value with "…"). It is used to place the comment.

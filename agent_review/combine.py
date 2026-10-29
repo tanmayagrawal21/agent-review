@@ -39,6 +39,21 @@ def commentable(diff: str) -> dict[str, set[int]]:
     return out
 
 
+def anchor(findings: list[dict], read) -> list[dict]:
+    """Agents misnumber lines; their quoted `code` does not lie. Move each finding to the line holding that text
+    (nearest to the reported line when it occurs more than once); keep the reported line if the text is absent."""
+    out = []
+    for f in findings:
+        code = (f.get("code") or "").strip()
+        text = read(f.get("file") or "") if code and f.get("file") else None
+        if text:
+            hits = [i for i, ln in enumerate(text.splitlines(), 1) if ln.strip() == code]
+            if hits:
+                f = {**f, "line": min(hits, key=lambda i: abs(i - (f.get("line") or 0)))}
+        out.append(f)
+    return out
+
+
 def scanner_result(diff: str, terms: list[str], sha: str) -> dict:
     hits = scan_added(diff, terms)
     return {"agent": "scanner", "sha": sha, "status": "ok", "verdict": "changes" if hits else "approve",
@@ -152,6 +167,10 @@ def main() -> int:
     terms = load_terms(a.terms)
     diff = subprocess.run(["git", "-C", str(a.repo_dir), "diff", f"{a.base}...{a.head}"], check=True,
                           capture_output=True, text=True).stdout
+    def read_head(path: str) -> str | None:
+        r = subprocess.run(["git", "-C", str(a.repo_dir), "show", f"{a.head}:{path}"], capture_output=True, text=True)
+        return r.stdout if r.returncode == 0 else None
+
     results = []
     for agent in json.loads(a.agents):
         p = a.findings / f"findings-{agent}" / f"{agent}.json"  # each agent's own artifact, never merged
@@ -159,8 +178,9 @@ def main() -> int:
         if not r or r.get("sha") != a.head or r.get("agent") != agent:  # missing, stale or forged: fail closed
             r = {"agent": agent, "sha": a.head, "status": "error", "verdict": None, "summary": "", "findings": [],
                  "error": "no result for this commit"}
-        r["findings"] = [{**f, "severity": "blocking" if f.get("severity") == "blocking" else "suggestion",
-                          "message": str(f.get("message", ""))} for f in r.get("findings") or [] if isinstance(f, dict)]
+        r["findings"] = anchor([{**f, "severity": "blocking" if f.get("severity") == "blocking" else "suggestion",
+                                 "message": str(f.get("message", ""))} for f in r.get("findings") or []
+                                if isinstance(f, dict)], read_head)
         results.append(r)
     if "privacy" in json.loads(a.agents) and terms:
         results.append(scanner_result(diff, terms, a.head))

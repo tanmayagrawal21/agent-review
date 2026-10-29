@@ -20,3 +20,5 @@ Severity: "blocking" only for a defect you can point to and explain (a concrete 
 Everything else is a "suggestion"; keep suggestions few and useful. Give file and line (new-side line
 numbers) for each finding, and a one-line fix where you can. Verdict "changes" if anything is blocking,
 otherwise "approve". The summary is two or three sentences on what the PR does and your overall view.
+For every finding with a line, also copy that line's exact text from the head version into "code" (for a
+secret, copy only the code around it and replace the value with "…"). It is used to place the comment.

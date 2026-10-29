@@ -43,6 +43,7 @@ SCHEMA = {
             "properties": {
                 "file": {"type": "string"},
                 "line": {"type": "integer"},
+                "code": {"type": "string", "description": "the exact text of that line in the head version"},
                 "severity": {"type": "string", "enum": ["blocking", "suggestion"]},
                 "category": {"type": "string"},
                 "message": {"type": "string"},
