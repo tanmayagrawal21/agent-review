@@ -22,7 +22,10 @@ on:
         description: Key for the model endpoint
         required: false
       AGENT_REVIEW_BASE_URL:
-        description: Optional. The endpoint URL, if it should not appear in the config
+        description: The endpoint URL (preferred over base_url in the config, which is public)
+        required: false
+      AGENT_REVIEW_MODEL:
+        description: The model id (preferred over model in the config, which is public)
         required: false
 
 permissions:
@@ -66,6 +69,7 @@ jobs:
         env:
           HAS_KEY: ${{ secrets.AGENT_REVIEW_API_KEY != '' }}
           HAS_BASE_URL: ${{ secrets.AGENT_REVIEW_BASE_URL != '' }}
+          HAS_MODEL: ${{ secrets.AGENT_REVIEW_MODEL != '' }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE: ${{ github.event.pull_request.base.sha }}
@@ -108,6 +112,7 @@ jobs:
         env:
           AGENT_REVIEW_API_KEY: ${{ secrets.AGENT_REVIEW_API_KEY }}
           AGENT_REVIEW_BASE_URL: ${{ secrets.AGENT_REVIEW_BASE_URL }}
+          AGENT_REVIEW_MODEL: ${{ secrets.AGENT_REVIEW_MODEL }}
           AGENT: ${{ matrix.agent }}
         run: python -m agent_review.review --agent "$AGENT" --bundle ../bundle/bundle.json --out "../out/$AGENT.json"
       - uses: actions/upload-artifact@v4

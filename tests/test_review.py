@@ -68,8 +68,10 @@ def test_anthropic_api_and_key_scrub():
     assert r["tokens"] == {"input": 50, "cached": 7, "output": 9} and "k-ant-secret" not in json.dumps(r)
 
 
-def test_base_url_from_a_secret(monkeypatch):
+def test_endpoint_and_model_from_secrets_and_never_echoed(monkeypatch):
     monkeypatch.setenv(review.BASE_URL_ENV, "https://private.example/v1")
-    o, calls = opener({"choices": [{"message": {"content": json.dumps(OK)}}]})
-    review.run("reviewer", {**BUNDLE, "config": {**BUNDLE["config"], "base_url": ""}}, "k", o)
-    assert calls[0][0] == "https://private.example/v1/chat/completions"
+    monkeypatch.setenv(review.MODEL_ENV, "secret-model-7")
+    o, calls = opener({"choices": [{"message": {"content": json.dumps({**OK, "summary": "as secret-model-7"})}}]})
+    r = review.run("reviewer", {**BUNDLE, "config": {**BUNDLE["config"], "base_url": "", "model": ""}}, "k", o)
+    assert calls[0][0] == "https://private.example/v1/chat/completions" and calls[0][2]["model"] == "secret-model-7"
+    assert "secret-model-7" not in json.dumps(r)

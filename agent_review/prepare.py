@@ -19,7 +19,8 @@ from .config import AGENTS, load
 from .diff import HUNK, changed, git, walk
 
 
-def decide(cfg: dict, files: list[str], lines: int, draft: bool, has_key: bool, has_url: bool = False) -> dict:
+def decide(cfg: dict, files: list[str], lines: int, draft: bool, has_key: bool, has_url: bool = False,
+           has_model: bool = False) -> dict:
     """Which LLM agents run, whether the local privacy scan runs, and any gap (an enabled agent that can't)."""
     if draft and cfg["skip"]["draft"]:
         return {"agents": [], "local": False, "gap": [], "reason": "draft PR"}
@@ -28,7 +29,7 @@ def decide(cfg: dict, files: list[str], lines: int, draft: bool, has_key: bool, 
                 "reason": f"{lines} changed lines exceeds skip.max_changed_lines"}
     in_scope = [a for a in AGENTS if cfg["agents"][a]["enabled"] and (
         not cfg["agents"][a]["paths"] or any(fnmatch.fnmatch(f, p) for f in files for p in cfg["agents"][a]["paths"]))]
-    usable = has_key and bool(cfg["model"]) and (bool(cfg["base_url"]) or has_url)
+    usable = has_key and (bool(cfg["model"]) or has_model) and (bool(cfg["base_url"]) or has_url)
     gap = [] if usable else in_scope
     reason = "" if usable or not in_scope else "no model configured or no key (fork PRs get no secrets)"
     return {"agents": in_scope if usable else [], "local": "privacy" in in_scope, "gap": gap, "reason": reason}
@@ -102,7 +103,7 @@ def main() -> int:
     cfg = load(a.repo, a.base, a.config)
     files, lines = changed(a.repo, a.base, a.head)
     plan = decide(cfg, files, lines, a.draft == "true", os.environ.get("HAS_KEY") == "true",
-                  os.environ.get("HAS_BASE_URL") == "true")
+                  os.environ.get("HAS_BASE_URL") == "true", os.environ.get("HAS_MODEL") == "true")
     run = bool(plan["agents"] or plan["local"])
     if run:
         bundle = build(a.repo, a.base, a.head, cfg, plan, os.environ.get("PR_TITLE", ""),

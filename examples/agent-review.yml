@@ -1,7 +1,7 @@
 # .github/agent-review.yml. Read from the PR's base branch, so a PR cannot change its own review.
+# Endpoint, model and key belong in secrets (AGENT_REVIEW_BASE_URL, AGENT_REVIEW_MODEL, AGENT_REVIEW_API_KEY):
+# this file is public. base_url / model here are only a fallback when the secrets are not set.
 api: openai              # openai: any OpenAI-compatible endpoint | anthropic: Messages API
-base_url: https://api.openai.com/v1   # or leave empty and set the AGENT_REVIEW_BASE_URL secret
-model: gpt-5.1-mini      # e.g. google/gemini-3-flash (OpenRouter), claude-sonnet-4-5 (api: anthropic), qwen3.5:9b
 agents:
   reviewer: {enabled: true}
   privacy:  {enabled: true}

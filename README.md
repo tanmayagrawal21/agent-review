@@ -18,10 +18,17 @@ prepare (checkout, redact locally) ─► bundle.json ─┬─ reviewer ─┐
 ## Set up
 
 1. Copy [`examples/caller.yml`](examples/caller.yml) to `.github/workflows/agent-review.yml`.
-2. Add [`examples/agent-review.yml`](examples/agent-review.yml) as `.github/agent-review.yml` and set
-   `base_url` and `model` (any OpenAI-compatible endpoint, or `api: anthropic`).
-3. Add the secret `AGENT_REVIEW_API_KEY`. Optionally, add `AGENT_REVIEW_BASE_URL` to keep the endpoint URL
-   out of the config.
+2. Add three repository secrets (Settings → Secrets and variables → Actions):
+
+   | secret | value |
+   |---|---|
+   | `AGENT_REVIEW_API_KEY` | the key for your model endpoint |
+   | `AGENT_REVIEW_BASE_URL` | any OpenAI-compatible endpoint, e.g. `https://api.openai.com/v1` |
+   | `AGENT_REVIEW_MODEL` | the model id |
+
+   These are secrets, not config, so which provider and model a repo uses never appears in the public repo.
+3. Optional: [`examples/agent-review.yml`](examples/agent-review.yml) as `.github/agent-review.yml`, to turn
+   agents off, scope them to paths, make the check blocking, or add notes about the codebase.
 
 With no key, only the local privacy scan runs.
 

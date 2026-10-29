@@ -13,7 +13,8 @@ from pathlib import Path
 from . import llm, pii
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
-BASE_URL_ENV = "AGENT_REVIEW_BASE_URL"  # optional secret: keeps a private endpoint's URL out of the config
+# Secrets, preferred over the config: which endpoint and model a repo uses stays out of the public repository.
+BASE_URL_ENV, MODEL_ENV = "AGENT_REVIEW_BASE_URL", "AGENT_REVIEW_MODEL"
 LANES = {
     "reviewer": "correctness, behaviour, compatibility and tests",
     "privacy": "secrets, credentials and personal data in the change, or exposed by it at runtime",
@@ -87,11 +88,12 @@ def normalise(agent: str, head: str, so, tokens: dict, error: str | None) -> dic
 
 
 def run(agent: str, b: dict, key: str, opener=None) -> dict:
-    cfg = {**b["config"], "base_url": b["config"]["base_url"] or os.environ.get(BASE_URL_ENV, "")}
+    cfg = {**b["config"], "base_url": os.environ.get(BASE_URL_ENV) or b["config"]["base_url"],
+           "model": os.environ.get(MODEL_ENV) or b["config"]["model"]}
     system, user = brief(agent, b)
     r = llm.call(cfg, key, system, user, SCHEMA, **({"opener": opener} if opener else {}))
     res = normalise(agent, b["head"], r["structured"], r["tokens"], r["error"])
-    secrets = [v for v in (key, os.environ.get(BASE_URL_ENV, "")) if len(v) >= 8]
+    secrets = [v for v in (key, os.environ.get(BASE_URL_ENV, ""), os.environ.get(MODEL_ENV, "")) if len(v) >= 4]
     return json.loads(pii.scrub(json.dumps(res), [json.dumps(s)[1:-1] for s in secrets]))
 
 
