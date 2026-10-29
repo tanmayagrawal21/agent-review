@@ -1,31 +1,33 @@
-"""Per-repo configuration (.github/agent-review.yml). Every key is optional; unknown keys are an error."""
+"""Per-repo configuration, `.github/agent-review.yml`, always read at the PR's BASE commit so a pull request
+cannot change its own review. Every key is optional; unknown keys are an error."""
 
 from __future__ import annotations
 
 import copy
 import re
-import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 
 import yaml
 
-AGENTS = ("reviewer", "privacy", "safety")
+from .diff import git
 
+AGENTS = ("reviewer", "privacy", "safety")
 DEFAULTS: dict = {
+    "api": "openai",  # openai (any OpenAI-compatible endpoint) | anthropic (Messages API)
+    "base_url": "",  # e.g. https://api.openai.com/v1, https://openrouter.ai/api/v1, https://api.anthropic.com
+    "model": "",  # e.g. gpt-5.1-mini, google/gemini-3-flash, claude-sonnet-4-5, qwen3.5:9b
     "agents": {
-        "reviewer": {"enabled": True},
-        "privacy": {"enabled": True, "engine": "local"},  # local (no LLM) | llm | both
-        "safety": {"enabled": True, "paths": []},  # empty = every PR; globs scope it to matching files
+        "reviewer": {"enabled": True, "paths": []},
+        "privacy": {"enabled": True, "paths": []},
+        "safety": {"enabled": True, "paths": []},  # [] = every PR; globs scope an agent to matching files
     },
-    "blocking": False,  # advisory by default: the check stays green and humans decide
-    "engine": "auto",  # auto | openai-compatible | claude-code; auto picks by the credential the repo has
-    "model": "",  # required for openai-compatible (e.g. gpt-5.1-mini, gemini-3-flash); claude-code: sonnet
-    "base_url": "",  # openai-compatible endpoint, e.g. https://api.openai.com/v1, https://openrouter.ai/api/v1
-    "max_context_chars": 150_000,  # openai-compatible: diff + changed files sent to the model
-    "max_budget_usd": 1.0,  # per agent per run
-    "skip": {"draft": True, "max_changed_lines": 2000},
-    "instructions": "",  # repo-specific notes every agent reads (conventions, risky areas)
+    "redact": True,  # every text passes through the local PII model before any model sees it
+    "blocking": False,  # true: the check fails when an agent requests changes, errors, or cannot run
+    "max_context_chars": 150_000,  # diff + changed files sent to the model; a larger diff is not reviewed
+    "warn_changed_lines": 1000,  # a longer PR gets a note in the review (0 = never)
+    "skip": {"draft": True, "max_changed_lines": 0},  # 0 = no limit; set one to skip very large PRs
+    "instructions": "",  # notes for every agent about this codebase
 }
 
 
@@ -42,32 +44,40 @@ def _merge(base: dict, over: dict, where: str = "") -> dict:
     return out
 
 
-def load_at(repo: Path, ref: str, path: str) -> dict:
-    """The config as of `ref` (the PR's base), so a pull request cannot switch off its own review."""
-    r = subprocess.run(["git", "-C", str(repo), "show", f"{ref}:{path}"], capture_output=True, text=True)
-    return load_text(r.stdout if r.returncode == 0 else "")
-
-
-def load(path: Path | None) -> dict:
-    return load_text(path.read_text() if path and path.exists() else "")
-
-
-def load_text(text: str) -> dict:
+def parse(text: str) -> dict:
     raw = yaml.safe_load(text) if text.strip() else None
     if raw is not None and not isinstance(raw, dict):
         raise ConfigError("config must be a mapping")
+    for k in ("agents", "skip"):
+        if raw and k in raw and not isinstance(raw[k], dict):
+            raise ConfigError(f"{k} must be a mapping")
+    for name, v in ((raw or {}).get("agents") or {}).items():
+        if not isinstance(v, dict):
+            raise ConfigError(f"agents.{name} must be a mapping")
     cfg = _merge(DEFAULTS, raw or {})
-    if not isinstance(cfg["agents"]["safety"].get("paths", []), list):
-        raise ConfigError("agents.safety.paths must be a list of globs")
-    if cfg["engine"] not in ("auto", "openai-compatible", "claude-code"):
-        raise ConfigError("engine must be auto, openai-compatible or claude-code")
-    if cfg["agents"]["privacy"].get("engine") not in ("local", "llm", "both"):
-        raise ConfigError("agents.privacy.engine must be local, llm or both")
-    url = str(cfg["base_url"])
-    parsed = urlparse(url)
-    local = parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1", "::1")
-    if url and not ((parsed.scheme == "https" and parsed.hostname) or local):
+    if cfg["api"] not in ("openai", "anthropic"):
+        raise ConfigError("api must be openai or anthropic")
+    url = urlparse(str(cfg["base_url"]))
+    local = url.scheme == "http" and url.hostname in ("localhost", "127.0.0.1", "::1")
+    if cfg["base_url"] and not ((url.scheme == "https" and url.hostname) or local):
         raise ConfigError("base_url must be https (or http://localhost for a self-hosted model)")
     if cfg["model"] and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}", str(cfg["model"])):
-        raise ConfigError("model must be a plain model name (e.g. gpt-5.1-mini, openai/gpt-4o, qwen3.5:9b)")
+        raise ConfigError("model must be a plain model name")
+    for k in ("warn_changed_lines", "max_context_chars"):
+        if isinstance(cfg[k], bool) or not isinstance(cfg[k], int) or cfg[k] < 0:
+            raise ConfigError(f"{k} must be a non-negative integer")
+    mcl = cfg["skip"]["max_changed_lines"]
+    if isinstance(mcl, bool) or not isinstance(mcl, int) or mcl < 0:
+        raise ConfigError("skip.max_changed_lines must be a non-negative integer")
+    for name in AGENTS:
+        if not isinstance(cfg["agents"][name].get("paths", []), list):
+            raise ConfigError(f"agents.{name}.paths must be a list of globs")
     return cfg
+
+
+def load(repo: Path, base: str, path: str = ".github/agent-review.yml") -> dict:
+    try:
+        text = git(repo, "show", f"{base}:{path}")
+    except Exception:  # noqa: BLE001 - no config file at the base commit: defaults
+        text = ""
+    return parse(text)

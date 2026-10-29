@@ -1,12 +1,13 @@
 # Reusable workflow: call it from a repository's pull_request workflow (see examples/caller.yml).
-# plan -> one job per enabled agent (parallel, read-only, no GitHub token) -> combine (one PR review).
+#   prepare  checkout + config at base + local scan and redaction -> bundle.json (redacted)
+#   review   one job per agent; input is only the bundle; no checkout, no GitHub token
+#   publish  one PR review from the bundle and the findings
 name: agent-review
 
 on:
   workflow_call:
     inputs:
       config:
-        description: Path of the config file in the calling repository
         type: string
         default: .github/agent-review.yml
       tool-repo:
@@ -16,33 +17,27 @@ on:
         description: Version of agent-review to run (keep in step with the @ref you call)
         type: string
         default: v1
-      claude-code-version:
-        type: string
-        default: 2.1.282
     secrets:
-      ANTHROPIC_API_KEY:
-        required: false
-      CLAUDE_CODE_OAUTH_TOKEN:
-        required: false
       AGENT_REVIEW_API_KEY:
-        description: Key for an OpenAI-compatible endpoint (set engine/base_url/model in the config)
+        description: Key for the model endpoint
         required: false
-      AGENT_REVIEW_PRIVATE_TERMS:
-        description: Optional. One private term per line; matched in plain code, never shown to a model
+      AGENT_REVIEW_BASE_URL:
+        description: The endpoint URL (preferred over base_url in the config, which is public)
+        required: false
+      AGENT_REVIEW_MODEL:
+        description: The model id (preferred over model in the config, which is public)
         required: false
 
 permissions:
   contents: read
 
 jobs:
-  plan:
+  prepare:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     outputs:
-      run: ${{ steps.plan.outputs.run }}
-      agents: ${{ steps.plan.outputs.agents }}
-      engine: ${{ steps.plan.outputs.engine }}
-      local: ${{ steps.plan.outputs.local }}
+      run: ${{ steps.prepare.outputs.run }}
+      agents: ${{ steps.prepare.outputs.agents }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,37 +55,47 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -q "pyyaml==6.0.2"
-      - id: plan
+      - uses: actions/cache@v4
+        with:
+          path: tool/agent_review/js/node_modules
+          key: local-pii-${{ hashFiles('tool/agent_review/js/package-lock.json') }}
+      - name: Install the local PII model
+        working-directory: tool/agent_review/js
+        run: |
+          [ -d node_modules/@nationaldesignstudio/rampart ] || npm ci --ignore-scripts --no-audit --no-fund
+          node pii.mjs <<< '[{"id":0,"text":"warm up"}]' > /dev/null   # fetches and caches the model once
+      - id: prepare
         working-directory: tool
         env:
-          HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
-          HAS_API_KEY: ${{ secrets.AGENT_REVIEW_API_KEY != '' }}
+          HAS_KEY: ${{ secrets.AGENT_REVIEW_API_KEY != '' }}
+          HAS_BASE_URL: ${{ secrets.AGENT_REVIEW_BASE_URL != '' }}
+          HAS_MODEL: ${{ secrets.AGENT_REVIEW_MODEL != '' }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           DRAFT: ${{ github.event.pull_request.draft }}
           CONFIG: ${{ inputs.config }}
         run: >
-          python -m agent_review.plan --repo ../pr --config "$CONFIG" --base "$BASE" --head "$HEAD"
-          --draft "$DRAFT" --has-key "$HAS_KEY" --has-api-key "$HAS_API_KEY"
+          python -m agent_review.prepare --repo ../pr --base "$BASE" --head "$HEAD" --config "$CONFIG"
+          --draft "$DRAFT" --out ../bundle/bundle.json
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.prepare.outputs.run == 'true'   # also when blocking mode fails the job
+        with:
+          name: bundle
+          path: bundle/bundle.json
+          retention-days: 1
 
-  agent:
-    needs: plan
-    if: needs.plan.outputs.run == 'true'
+  review:
+    needs: prepare
+    if: needs.prepare.outputs.agents != '[]' && needs.prepare.outputs.agents != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        agent: ${{ fromJSON(needs.plan.outputs.agents) }}
+        agent: ${{ fromJSON(needs.prepare.outputs.agents) }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-          path: pr
-          persist-credentials: false
-      - name: Drop the PR's own agent configuration (defence in depth; restricted mode ignores it too)
-        run: rm -rf pr/.claude pr/.mcp.json
       - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.tool-repo }}
@@ -100,60 +105,33 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -q "pyyaml==6.0.2"
-      - name: Install Claude Code (claude-code engine only)
-        if: needs.plan.outputs.engine == 'claude-code'
-        env:
-          VERSION: ${{ inputs.claude-code-version }}
-        run: npm install -g "@anthropic-ai/claude-code@$VERSION"
-      - name: Cache the local PII model
-        if: matrix.agent == 'privacy' && needs.plan.outputs.local == 'true'
-        uses: actions/cache@v4
+      - uses: actions/download-artifact@v4
         with:
-          path: tool/agent_review/js/node_modules
-          key: local-pii-${{ hashFiles('tool/agent_review/js/package-lock.json') }}
-      - name: Install the local PII model (privacy, local engine)
-        if: matrix.agent == 'privacy' && needs.plan.outputs.local == 'true'
-        working-directory: tool/agent_review/js
-        run: |
-          [ -d node_modules/@nationaldesignstudio/rampart ] || npm ci --ignore-scripts --no-audit --no-fund
-          node pii.mjs <<< '[{"id":0,"text":"warm up"}]' > /dev/null   # fetches and caches the model once
+          name: bundle
+          path: bundle
       - working-directory: tool
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           AGENT_REVIEW_API_KEY: ${{ secrets.AGENT_REVIEW_API_KEY }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
+          AGENT_REVIEW_BASE_URL: ${{ secrets.AGENT_REVIEW_BASE_URL }}
+          AGENT_REVIEW_MODEL: ${{ secrets.AGENT_REVIEW_MODEL }}
           AGENT: ${{ matrix.agent }}
-          PEERS: ${{ needs.plan.outputs.agents }}
-          CONFIG: ${{ inputs.config }}
-        run: >
-          python -m agent_review.run_agent --agent "$AGENT" --repo ../pr --config "$CONFIG"
-          --base "$BASE" --head "$HEAD" --peers "$PEERS" --out "../findings/$AGENT.json"
+        run: python -m agent_review.review --agent "$AGENT" --bundle ../bundle/bundle.json --out "../out/$AGENT.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: findings-${{ matrix.agent }}
-          path: findings/${{ matrix.agent }}.json   # only this agent's own file
+          path: out/${{ matrix.agent }}.json   # only this agent's own file
           if-no-files-found: ignore
+          retention-days: 1
 
-  combine:
-    needs: [plan, agent]
-    if: ${{ !cancelled() && needs.plan.outputs.run == 'true' }}
+  publish:
+    needs: [prepare, review]
+    if: ${{ !cancelled() && needs.prepare.outputs.run == 'true' }}   # runs even when prepare failed closed
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-          path: pr
-          persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.tool-repo }}
@@ -166,20 +144,15 @@ jobs:
       - run: pip install -q "pyyaml==6.0.2"
       - uses: actions/download-artifact@v4
         with:
+          name: bundle
+          path: bundle
+      - uses: actions/download-artifact@v4
+        with:
           pattern: findings-*
           path: findings   # one folder per artifact (findings/findings-<agent>/), never merged
-      - name: Write private terms outside the workspace
-        env:
-          TERMS: ${{ secrets.AGENT_REVIEW_PRIVATE_TERMS }}
-        run: printf '%s\n' "$TERMS" > "$RUNNER_TEMP/terms.txt"
       - working-directory: tool
         env:
           GH_TOKEN: ${{ github.token }}
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
           PR: ${{ github.event.pull_request.number }}
-          AGENTS: ${{ needs.plan.outputs.agents }}
-          CONFIG: ${{ inputs.config }}
         run: >
-          python -m agent_review.combine --repo-dir ../pr --config "$CONFIG" --findings ../findings
-          --base "$BASE" --head "$HEAD" --agents "$AGENTS" --terms "$RUNNER_TEMP/terms.txt" --pr "$PR"
+          python -m agent_review.publish --bundle ../bundle/bundle.json --findings ../findings --pr "$PR"

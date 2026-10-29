@@ -3,7 +3,7 @@ lets someone do that they should not. Reason adversarially from the diff and the
 
 Controls are authentication, authorization and permission checks, approvals, limits and quotas, rate
 limits, input validation at trust boundaries, and the config or environment that sets them. For every
-control the diff touches, read the whole module and ask:
+control the diff touches, read the whole changed file and ask:
 - Boundary values, negative or huge inputs, empty or malformed config: does the control still hold?
   (A bug that weakens a control, such as an off-by-one in a limit, is yours, not the reviewer's.)
 - Can an environment variable, config file, request parameter or caller argument loosen it?
