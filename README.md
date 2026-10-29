@@ -27,7 +27,7 @@ prepare (checkout, redact locally) ─► bundle.json ─┬─ reviewer ─┐
    | `AGENT_REVIEW_MODEL` | the model id |
 
    They are secrets, not config, so the public repo never shows which provider or model you use. An Anthropic
-   endpoint is detected automatically; everything else is called as OpenAI-compatible.
+   endpoint is detected automatically.
 3. Open a pull request. The review appears as one comment within a few minutes.
 
 Optional: copy [`examples/agent-review.yml`](examples/agent-review.yml) to `.github/agent-review.yml` to turn
@@ -36,7 +36,7 @@ agents off, scope them to paths, make the check blocking, or give the agents not
 ## Guarantees
 
 - **Redact first.** Every line goes through secret patterns and the on-device PII model before any text
-  leaves the runner. If the redactor can't run, nothing is sent.
+  leaves the runner. If the redactor can't run, nothing is sent. (On by default; `redact: false` turns it off.)
 - **Agents are read-only.** They see only the redacted bundle: no checkout, no tools, no GitHub token.
 - **A PR can't change its own review.** The config is read from the base branch, and each agent's result must
   match its name and the head commit.
@@ -46,9 +46,11 @@ agents off, scope them to paths, make the check blocking, or give the agents not
 
 ## Limits
 
-- Diffs over `max_context_chars` (150k characters) aren't sent to a model: the PR gets a "not reviewed" note,
-  never a partial review. PRs over 1,000 changed lines get a warning.
-- Pull requests from forks get no secrets, so only the local privacy scan runs on them.
+- Diffs over `max_context_chars` (150k characters) aren't sent to a model. The review lists those agents as
+  "not reviewed", never as a partial review; the local privacy scan still runs. PRs over 1,000 changed lines
+  get a warning.
+- Pull requests from forks get no secrets and a read-only token, so only the local privacy scan runs, and its
+  result appears in the workflow run's summary rather than on the PR.
 - File names are not redacted. Keep personal data out of paths.
 
 How it works, with diagrams and the trust model: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

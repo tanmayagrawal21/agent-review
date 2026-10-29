@@ -37,12 +37,17 @@ def results(bundle: dict, findings_dir: Path) -> list[dict]:
         r["findings"] = [{**f, "severity": "blocking" if f.get("severity") == "blocking" else "suggestion",
                           "message": str(f.get("message", ""))} for f in r.get("findings") or [] if isinstance(f, dict)]
         out.append(r)
+    why = bundle.get("notice") or "could not run"
+    for agent in bundle.get("gap") or []:  # enabled but not run (too large, no key): a visible row, not approved
+        if agent not in bundle["agents"]:
+            out.append({"agent": agent, "status": "error", "verdict": None, "summary": "", "findings": [],
+                        "tokens": ZERO, "error": f"not reviewed: {why}"})
     if bundle.get("privacy"):
         local = bundle["local_findings"]
         llm = next((r for r in out if r["agent"] == "privacy"), None)
         summary = f"Local scan (Rampart on-device PII model + secret patterns): {len(local)} finding(s)."
         if llm is None:
-            out.append({"agent": "privacy", "status": "ok", "summary": summary + " No model pass (no key).",
+            out.append({"agent": "privacy", "status": "ok", "summary": summary + f" No model pass: {why}.",
                         "findings": local, "tokens": ZERO, "engine": "local",
                         "verdict": "changes" if any(f["severity"] == "blocking" for f in local) else "approve"})
         else:
@@ -167,12 +172,12 @@ def main() -> int:
     bundle = json.loads(a.bundle.read_text())
     review, failed = build(results(bundle, a.findings), bundle)
     review = json.loads(pii.scrub(json.dumps(review), []))  # last line of defence on everything posted
+    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):  # first, so it is visible even if posting fails
+        Path(summary).write_text(review["body"])
     if a.dry_run or not a.pr:
         print(json.dumps(review, indent=2))
     else:
         post(os.environ["GITHUB_REPOSITORY"], a.pr, review)
-    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
-        Path(summary).write_text(review["body"])
     return 1 if failed and bundle["config"]["blocking"] else 0
 
 

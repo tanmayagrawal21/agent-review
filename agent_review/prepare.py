@@ -123,6 +123,7 @@ def main() -> int:
             bundle = {"base": a.base, "head": a.head, "agents": [], "redacted": True, "diff": "", "files": {},
                       "local_findings": [], "config": {"blocking": cfg["blocking"]}}
         bundle["privacy"], bundle["notice"], bundle["warning"] = plan["local"], plan["reason"], plan["warning"]
+        bundle["gap"] = plan["gap"]  # enabled agents that could not run: shown as "not reviewed", never omitted
         a.out.parent.mkdir(parents=True, exist_ok=True)
         a.out.write_text(json.dumps(bundle))
     print(json.dumps({k: plan[k] for k in ("agents", "local", "gap", "reason")}))
