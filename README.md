@@ -38,9 +38,16 @@ summary. It also collapses the previous agent review when you push again.
   (`blocking: false`). Set `blocking: true` and make the check required if you want it to gate merges. An agent
   that errors or times out counts as "not approved", never as a pass.
 - **Agents don't run the PR's code.** Your CI already runs the tests. Running untrusted code next to the API
-  key would let a PR steal it. Agents can only use Read, Grep, Glob and `git diff/log/show`. They get no GitHub
-  token, and no web or edit tools.
-- **A PR can't switch off its own review.** The config is read from the PR's base commit.
+  key would let a PR steal it. Agents run in Claude Code's `--restricted` mode with only Read, Grep and Glob.
+  That means no shell, no web, no edits, file access confined to the checkout and the diff, the PR's own
+  `.claude/` settings and `.mcp.json` ignored (and deleted), and no GitHub token. Every agent output is also
+  scrubbed of credentials before it is posted.
+- **A PR can't switch off its own review.** The config is read from the PR's base commit, and each agent's
+  findings live in their own artifact and must name that agent and the head commit. One caveat: on
+  `pull_request`, a PR can edit the calling workflow itself, so protect `.github/workflows/` with CODEOWNERS
+  and required reviews.
+- **Blocking mode fails closed.** With `blocking: true`, a PR that is skipped (too large, or no credential,
+  e.g. a fork) fails the check instead of passing unreviewed.
 - **The PR's text is data, not instructions.** The title and description go to the agents marked as
   untrusted. Every posted text is redacted against the private terms.
 - **Forks:** GitHub gives no secrets to PRs from forks, so those get no review (the plan job says why). Don't
@@ -68,7 +75,8 @@ one comment holding every agent's finding.
 
 ## Versioning
 
-Callers pin a tag (`@v1`). Each release moves `v1`; breaking changes get `v2`. The prompts are tuned and
+Callers pin a tag (`@v1`). Each release moves `v1`; breaking changes get `v2`. If you pin another ref, pass
+the same one as `tool-ref`, so the scripts match the workflow. The prompts are tuned and
 measured with [swe-harness](https://github.com/tanmayagrawal21/swe-harness) before release.
 
 MIT licensed.

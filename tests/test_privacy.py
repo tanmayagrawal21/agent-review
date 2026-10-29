@@ -24,3 +24,8 @@ def test_added_lines_only_with_new_side_line_numbers_and_phone_separators():
 
 def test_redact():
     assert redact("Ask JANE DOE on 555-010-4477.", ["jane doe", "(555) 010 4477"]) == "Ask [redacted] on [redacted]."
+
+
+def test_an_added_line_starting_with_plus_plus_is_not_a_file_header():
+    diff = "--- a/x\n+++ b/x\n@@ -1 +1,2 @@\n keep\n+++ Jane Doe\n"
+    assert [(h.file, h.line) for h in scan_added(diff, ["Jane Doe"])] == [("x", 2)]

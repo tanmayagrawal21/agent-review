@@ -17,6 +17,7 @@ from .config import AGENTS, load_at
 from .privacy import load_terms, redact, scan_added
 
 MARKER = "<!-- agent-review -->"
+MAX_BODY = 60_000  # GitHub's limit is 65,536 characters
 TITLES = {"reviewer": "Reviewer", "privacy": "Privacy", "safety": "Safety", "scanner": "Private-terms scan"}
 
 
@@ -24,8 +25,10 @@ def commentable(diff: str) -> dict[str, set[int]]:
     """Lines on the new side of each hunk (added or context): the only places GitHub accepts inline comments."""
     out: dict[str, set[int]] = {}
     file, line = "", 0
+    prev = ""
     for raw in diff.splitlines():
-        if raw.startswith("+++ "):
+        header, prev = raw.startswith("+++ ") and prev.startswith("--- "), raw
+        if header:
             file = raw[6:] if raw.startswith("+++ b/") else ""
         elif raw.startswith("@@"):
             m = re.search(r"\+(\d+)", raw)
@@ -59,6 +62,10 @@ def group(results: list[dict]) -> list[tuple[str, int | None, list[tuple[str, di
                 index[key] = len(out)
             out.append((key[0], key[1], [(r["agent"], f)]))
     return out
+
+
+def _clip(text: str) -> str:
+    return text if len(text) <= MAX_BODY else text[:MAX_BODY] + "\n\n…(truncated)"
 
 
 def _item(agent: str, f: dict) -> str:
@@ -96,7 +103,7 @@ def build(results: list[dict], diff: str, sha: str, terms: list[str]) -> tuple[d
         body += "\n\n### Findings outside the changed lines\n" + "\n".join(body_items)
     body += "\n\n<sub>Automated and advisory: these agents read the diff but do not run the code. A human decides " \
             "the merge.</sub>"
-    review = {"commit_id": sha, "event": "COMMENT", "body": redact(body, terms),
+    review = {"commit_id": sha, "event": "COMMENT", "body": _clip(redact(body, terms)),
               "comments": [{**c, "body": redact(c["body"], terms)} for c in comments]}
     return review, failed
 
@@ -120,7 +127,7 @@ def post(repo: str, pr: int, review: dict) -> None:
     except RuntimeError:  # e.g. a line GitHub will not anchor: post everything in the body instead
         extra = "\n".join(f"- `{c['path']}:{c['line']}` {c['body']}" for c in review["comments"])
         gh(base, "--method", "POST", payload={**review, "comments": [],
-                                               "body": review["body"] + "\n\n### Inline findings\n" + extra})
+                                               "body": _clip(review["body"] + "\n\n### Inline findings\n" + extra)})
     for rv in old:  # best effort: collapse earlier reviews so only the latest one reads as current
         try:
             gh(f"{base}/{rv['id']}", "--method", "PUT",
@@ -147,11 +154,13 @@ def main() -> int:
                           capture_output=True, text=True).stdout
     results = []
     for agent in json.loads(a.agents):
-        p = a.findings / f"{agent}.json"
+        p = a.findings / f"findings-{agent}" / f"{agent}.json"  # each agent's own artifact, never merged
         r = json.loads(p.read_text()) if p.exists() else None
-        if not r or r.get("sha") != a.head:  # missing, or for another commit: fail closed
+        if not r or r.get("sha") != a.head or r.get("agent") != agent:  # missing, stale or forged: fail closed
             r = {"agent": agent, "sha": a.head, "status": "error", "verdict": None, "summary": "", "findings": [],
                  "error": "no result for this commit"}
+        r["findings"] = [{**f, "severity": "blocking" if f.get("severity") == "blocking" else "suggestion",
+                          "message": str(f.get("message", ""))} for f in r.get("findings") or [] if isinstance(f, dict)]
         results.append(r)
     if "privacy" in json.loads(a.agents) and terms:
         results.append(scanner_result(diff, terms, a.head))

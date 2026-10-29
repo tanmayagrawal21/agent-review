@@ -36,8 +36,10 @@ class Hit:
 def scan_added(diff: str, terms: list[str]) -> list[Hit]:
     """Hits in added lines and in new file paths of a unified diff."""
     pats, hits, file, line = patterns(terms), [], "", 0
+    prev = ""
     for raw in diff.splitlines():
-        if raw.startswith("+++ "):
+        header, prev = raw.startswith("+++ ") and prev.startswith("--- "), raw
+        if header:
             file = raw[6:] if raw.startswith("+++ b/") else ""
             hits += [Hit(file, None, i) for i, p in enumerate(pats, 1) if file and p.search(file)]
         elif raw.startswith("@@"):

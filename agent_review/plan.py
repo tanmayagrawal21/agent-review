@@ -57,7 +57,12 @@ def main() -> int:
     print(json.dumps(d))
     if out := os.environ.get("GITHUB_OUTPUT"):
         with open(out, "a") as fh:
-            fh.write(f"run={str(d['run']).lower()}\nagents={json.dumps(d['agents'])}\nreason={d['reason']}\n")
+            fh.write(f"run={str(d['run']).lower()}\nagents={json.dumps(d['agents'])}\n")
+    if not d["run"]:
+        # blocking mode fails closed: an unreviewed PR must not pass (drafts can't merge, so they are exempt)
+        fail = cfg["blocking"] and d["reason"] not in ("draft PR", "no agent in scope")
+        print(f"::{'error' if fail else 'notice'}::agent-review skipped: {d['reason']}")
+        return 1 if fail else 0
     return 0
 
 
