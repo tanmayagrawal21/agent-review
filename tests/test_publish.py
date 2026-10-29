@@ -57,3 +57,10 @@ def test_cli_scrubs_credentials_from_what_is_posted(tmp_path):
                           "--findings", str(tmp_path / "f"), "--dry-run"],
                          cwd=ROOT, capture_output=True, text=True, check=True).stdout
     assert "ghp_" not in out and "[credential removed]" in out
+
+
+def test_a_skipped_review_is_announced_not_silent():
+    b = {"head": "h" * 40, "agents": [], "privacy": False, "diff": "", "files": {}, "local_findings": [],
+         "config": {"blocking": False}, "notice": "3138 changed lines exceeds skip.max_changed_lines"}
+    review, failed = build(results(b, Path("/nonexistent")), b)
+    assert "**Not reviewed:** 3138 changed lines" in review["body"] and review["comments"] == [] and failed
