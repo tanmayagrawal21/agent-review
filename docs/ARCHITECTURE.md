@@ -79,11 +79,11 @@ flowchart TD
        L[line] --> S{"provider key<br/>format?"}
        S -- yes --> SX["→ [SECRET]<br/>+ blocking finding"]
        S -- no --> X
-       SX --> X["prose only:<br/>strings + comments in code,<br/>whole line in text files"]
+       SX --> X["every line, whole<br/>(no string/comment parsing<br/>to get wrong)"]
        X --> F["skip obvious fakes<br/>example.com · Jane Doe · 555-01xx"]
        F --> M["Rampart<br/>(on-device, CC BY 4.0)"]
        M --> O["placeholders<br/>[GIVEN_NAME_1] [EMAIL_1] [SSN_1]"]
-       M --> FN["local findings<br/>IDs/financial: blocking<br/>names/emails/phones: suggestion"]
+       M --> FN["local findings<br/>in code: only inside strings/comments<br/>or data-like (words, digits, @)<br/>IDs/financial: blocking · names, emails: suggestion"]
    ```
 
    - **Secret patterns** cover the formats Rampart does not detect: Anthropic, OpenAI, Stripe, GitHub,
