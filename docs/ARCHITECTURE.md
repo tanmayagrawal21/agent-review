@@ -69,7 +69,7 @@ flowchart TD
 2. **Who runs.** An agent runs if it is enabled, if its `paths` globs match a changed file (`[]` means every
    PR), and if a model is configured. That takes the secrets `AGENT_REVIEW_API_KEY`, `AGENT_REVIEW_BASE_URL`
    and `AGENT_REVIEW_MODEL`. The endpoint and model are secrets rather than config, so which provider a repo
-   uses never appears in the public repository; `base_url` and `model` in the config are only a fallback. Drafts and PRs over `skip.max_changed_lines` are skipped. The privacy
+   uses never appears in the public repository; `base_url` and `model` in the config are only a fallback. Drafts are skipped. There is no line limit by default (`skip.max_changed_lines: 0`); a PR over `warn_changed_lines` (1000) gets a warning in the review. The privacy
    agent's local half needs no key, so it always runs.
 3. **One local pass** (`agent_review/pii.py`) over every line of the diff, the changed files, the title, the
    description and the commit messages:

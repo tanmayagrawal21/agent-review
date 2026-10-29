@@ -104,6 +104,8 @@ def build(rs: list[dict], bundle: dict) -> tuple[dict, bool]:
         failed = True
     elif bundle.get("notice"):
         head += ["", f"> Note: {bundle['notice']}."]
+    if bundle.get("warning"):
+        head += ["", f"> Warning: {bundle['warning']}."]
     body = "\n".join(head)
     for r in rs:
         body += f"\n\n### {TITLES[r['agent']]}\n" + (r["summary"] if r["status"] == "ok" else

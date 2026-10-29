@@ -22,6 +22,15 @@ from .diff import HUNK, changed, git, walk
 def decide(cfg: dict, files: list[str], lines: int, draft: bool, has_key: bool, has_url: bool = False,
            has_model: bool = False) -> dict:
     """Which LLM agents run, whether the local privacy scan runs, and any gap (an enabled agent that can't)."""
+    plan = _decide(cfg, files, lines, draft, has_key, has_url, has_model)
+    warn = cfg["warn_changed_lines"]
+    plan["warning"] = (f"this is a long PR ({lines} changed lines); review quality drops on large changes, "
+                       "so consider splitting it") if warn and lines > warn else ""
+    return plan
+
+
+def _decide(cfg: dict, files: list[str], lines: int, draft: bool, has_key: bool, has_url: bool,
+            has_model: bool) -> dict:
     if draft and cfg["skip"]["draft"]:
         return {"agents": [], "local": False, "gap": [], "reason": "draft PR"}
     if cfg["skip"]["max_changed_lines"] and lines > cfg["skip"]["max_changed_lines"]:
@@ -113,7 +122,7 @@ def main() -> int:
         else:  # nothing may run (e.g. too large): a bundle that carries only the reason, no PR content
             bundle = {"base": a.base, "head": a.head, "agents": [], "redacted": True, "diff": "", "files": {},
                       "local_findings": [], "config": {"blocking": cfg["blocking"]}}
-        bundle["privacy"], bundle["notice"] = plan["local"], plan["reason"]
+        bundle["privacy"], bundle["notice"], bundle["warning"] = plan["local"], plan["reason"], plan["warning"]
         a.out.parent.mkdir(parents=True, exist_ok=True)
         a.out.write_text(json.dumps(bundle))
     print(json.dumps({k: plan[k] for k in ("agents", "local", "gap", "reason")}))

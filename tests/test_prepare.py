@@ -20,7 +20,11 @@ def test_decide():
     assert keyless["agents"] == [] and keyless["local"] and keyless["gap"] == ["reviewer", "privacy", "safety"]
     assert decide(parse(""), files, 10, False, True, has_url=True, has_model=True)["agents"]  # all from secrets
     assert decide(CFG, files, 10, True, True)["agents"] == [] and decide(CFG, files, 10, True, True)["gap"] == []
-    assert decide(CFG, files, 5000, False, True)["gap"] == ["reviewer", "privacy", "safety"]
+    long = decide(CFG, files, 5000, False, True)
+    assert long["agents"] == ["reviewer", "privacy", "safety"] and "5000 changed lines" in long["warning"]
+    assert decide(CFG, files, 10, False, True)["warning"] == ""
+    capped = parse("base_url: https://x.example/v1\nmodel: m\nskip: {max_changed_lines: 2000}\n")
+    assert decide(capped, files, 5000, False, True)["gap"] == ["reviewer", "privacy", "safety"]
     scoped = parse("base_url: https://x.example/v1\nmodel: m\nagents:\n  safety: {paths: ['auth/*']}\n")
     assert decide(scoped, files, 10, False, True)["agents"] == ["reviewer", "privacy"]
 

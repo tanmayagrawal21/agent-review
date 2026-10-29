@@ -9,6 +9,7 @@ agents:
 redact: true             # every text passes through the local PII model before any model sees it
 blocking: false          # true: the check fails when an agent requests changes, errors, or cannot run
 max_context_chars: 150000
-skip: {draft: true, max_changed_lines: 2000}
+warn_changed_lines: 1000 # note long PRs in the review (0 = never)
+skip: {draft: true, max_changed_lines: 0}   # 0 = no limit
 instructions: |
   Payments code lives in billing/. Amounts are integer cents; never floats.
