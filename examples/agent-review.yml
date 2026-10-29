@@ -1,0 +1,11 @@
+# Optional: .github/agent-review.yml. Read from the PR's base branch, so a PR cannot change its own review.
+agents:
+  reviewer: {enabled: true}
+  privacy:  {enabled: true}
+  safety:   {enabled: true, paths: []}   # [] = every PR; e.g. ["auth/**", "**/config*", "infra/**"] to scope it
+blocking: false          # true: the check fails when an agent requests changes or errors
+model: sonnet
+max_budget_usd: 1.0      # per agent per run
+skip: {draft: true, max_changed_lines: 2000}
+instructions: |
+  Payments code lives in billing/. Amounts are integer cents; never floats.

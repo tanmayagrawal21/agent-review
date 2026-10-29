@@ -1,0 +1,158 @@
+# Reusable workflow: call it from a repository's pull_request workflow (see examples/caller.yml).
+# plan -> one job per enabled agent (parallel, read-only, no GitHub token) -> combine (one PR review).
+name: agent-review
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        description: Path of the config file in the calling repository
+        type: string
+        default: .github/agent-review.yml
+      tool-repo:
+        type: string
+        default: tanmayagrawal21/agent-review
+      tool-ref:
+        description: Version of agent-review to run (keep in step with the @ref you call)
+        type: string
+        default: v1
+      claude-code-version:
+        type: string
+        default: 2.1.282
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: false
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+      AGENT_REVIEW_PRIVATE_TERMS:
+        description: Optional. One private term per line; matched in plain code, never shown to a model
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+      agents: ${{ steps.plan.outputs.agents }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: pr
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.tool-repo }}
+          ref: ${{ inputs.tool-ref }}
+          path: tool
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q pyyaml
+      - id: plan
+        working-directory: tool
+        env:
+          HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          CONFIG: ${{ inputs.config }}
+        run: >
+          python -m agent_review.plan --repo ../pr --config "$CONFIG" --base "$BASE" --head "$HEAD"
+          --draft "$DRAFT" --has-key "$HAS_KEY"
+
+  agent:
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        agent: ${{ fromJSON(needs.plan.outputs.agents) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: pr
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.tool-repo }}
+          ref: ${{ inputs.tool-ref }}
+          path: tool
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q pyyaml && npm install -g "@anthropic-ai/claude-code@${{ inputs.claude-code-version }}"
+      - working-directory: tool
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          AGENT: ${{ matrix.agent }}
+          CONFIG: ${{ inputs.config }}
+        run: >
+          python -m agent_review.run_agent --agent "$AGENT" --repo ../pr --config "$CONFIG"
+          --base "$BASE" --head "$HEAD" --out "../findings/$AGENT.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: findings-${{ matrix.agent }}
+          path: findings/
+          if-no-files-found: ignore
+
+  combine:
+    needs: [plan, agent]
+    if: always() && needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: pr
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.tool-repo }}
+          ref: ${{ inputs.tool-ref }}
+          path: tool
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q pyyaml
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: findings-*
+          path: findings
+          merge-multiple: true
+      - name: Write private terms outside the workspace
+        env:
+          TERMS: ${{ secrets.AGENT_REVIEW_PRIVATE_TERMS }}
+        run: printf '%s\n' "$TERMS" > "$RUNNER_TEMP/terms.txt"
+      - working-directory: tool
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          PR: ${{ github.event.pull_request.number }}
+          AGENTS: ${{ needs.plan.outputs.agents }}
+          CONFIG: ${{ inputs.config }}
+        run: >
+          python -m agent_review.combine --repo-dir ../pr --config "$CONFIG" --findings ../findings
+          --base "$BASE" --head "$HEAD" --agents "$AGENTS" --terms "$RUNNER_TEMP/terms.txt" --pr "$PR"
