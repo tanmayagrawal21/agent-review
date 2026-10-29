@@ -57,6 +57,11 @@ def parse(text: str) -> dict:
         raise ConfigError("base_url must be https (or http://localhost for a self-hosted model)")
     if cfg["model"] and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}", str(cfg["model"])):
         raise ConfigError("model must be a plain model name")
+    for k in ("warn_changed_lines", "max_context_chars"):
+        if not isinstance(cfg[k], int) or cfg[k] < 0:
+            raise ConfigError(f"{k} must be a non-negative integer")
+    if not isinstance(cfg["skip"]["max_changed_lines"], int) or cfg["skip"]["max_changed_lines"] < 0:
+        raise ConfigError("skip.max_changed_lines must be a non-negative integer")
     for name in AGENTS:
         if not isinstance(cfg["agents"][name].get("paths", []), list):
             raise ConfigError(f"agents.{name}.paths must be a list of globs")

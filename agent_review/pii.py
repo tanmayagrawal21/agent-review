@@ -3,9 +3,12 @@ Actions runner; nothing it sees leaves the machine.
 
 Per line: provider-format secrets -> [SECRET] (Rampart is a personal-data model and does not detect keys), then
 Rampart, the on-device PII model (https://huggingface.co/nationaldesignstudio/rampart), replaces personal data
-with stable placeholders ([GIVEN_NAME_1], [EMAIL_1], ...). In code files only string literals and comments are
-classified (an identifier like `django` is not a name); in text, docs and data files whole lines are. Obviously
-fictional fixtures (example.com, Jane Doe, 555-01xx) are left alone. Line structure is preserved, so line numbers
+with stable placeholders ([GIVEN_NAME_1], [EMAIL_1], ...). Every line of every file is redacted whole: no
+parsing of strings or comments that a heredoc or an unusual quote could defeat. Obviously fictional fixtures
+(example.com, Jane Doe, 555-01xx) are left alone. Findings are stricter than redaction: in code files a
+detection is reported only inside a string or comment, or when it looks like data (several words, digits, @),
+so an identifier such as `django` may be masked for the model but is not reported as a name. Line structure is
+preserved, so line numbers
 stay valid. If the model cannot run this raises, and the caller fails closed: nothing is sent unredacted.
 """
 
@@ -51,54 +54,44 @@ BLOCKING = {"SSN", "CREDIT_CARD", "BANK_ACCOUNT", "ROUTING_NUMBER", "TAX_ID", "P
 REVIEW = {"GIVEN_NAME": "name", "SURNAME": "name", "EMAIL": "email address", "PHONE": "phone number",
           "BUILDING_NUMBER": "street address", "STREET_NAME": "street address", "SECONDARY_ADDRESS": "street address",
           "IP_ADDRESS": "IP address"}
-KEEP = {"URL", "CITY", "STATE", "ZIP_CODE"}  # not identifying on their own; left visible to reviewers
 
 
-BLOCKS = (('"""', '"""'), ("'''", "'''"), ("/*", "*/"), ("`", "`"), ("<!--", "-->"))
-
-
-def block_lines(path: str, text: str) -> set[int]:
-    """1-based lines of a code file that are inside (or open or close) a multi-line string or comment: those
-    lines are classified whole, like text."""
+def prose(path: str, line: str) -> list[tuple[int, int]]:
+    """Ranges of `line` that are prose: all of it in non-code files, else string literals and comments."""
     if Path(path).suffix.lower() not in CODE_SUFFIXES:
-        return set()
-    out, close = set(), None
-    for n, line in enumerate(text.split("\n"), 1):
-        i, touched = 0, close is not None
-        while i <= len(line):
-            if close:
-                j = line.find(close, i)
-                if j < 0:
-                    break
-                i, close = j + len(close), None
-                continue
-            opens = [(k, o, c) for o, c in BLOCKS if (k := line.find(o, i)) >= 0]
-            if not opens:
-                break
-            k, o, c = min(opens)
-            j = line.find(c, k + len(o))
-            if j >= 0:
-                i = j + len(c)  # opened and closed on this line: the per-line rules cover it
-                continue
-            close, touched = c, True
-            break
-        if touched or close:
-            out.add(n)
-    return out
-
-
-def spans(path: str, line: str, whole: bool = False) -> list[tuple[int, int]]:
-    """Character ranges of `line` the model classifies. `whole`: the line is inside a multi-line string or
-    comment (or its context is unknown), so all of it is."""
-    if whole or Path(path).suffix.lower() not in CODE_SUFFIXES:
-        return [(0, len(line))] if line.strip() else []
+        return [(0, len(line))]
     blanked = STRINGS.sub(lambda m: " " * len(m.group(0)), line)  # comment markers inside strings don't count
     comment = COMMENT.search(blanked)
     start = comment.start(1) if comment else len(line)
     out = [(m.start(g), m.end(g)) for m in STRINGS.finditer(line) for g in (1, 2, 3)
-           if m.group(g) and m.end(g) <= start]  # strings inside the comment are covered by the comment span
-    if comment and line[start:].strip():
-        out.append((start, len(line)))
+           if m.group(g) and m.end(g) <= start]
+    return out + ([(start, len(line))] if comment else [])
+
+
+def reportable(path: str, line: str, a: int, b: int) -> bool:
+    """Whether a detection at line[a:b] is reported (it is redacted either way)."""
+    t = line[a:b]
+    return (any(x <= a and b <= y for x, y in prose(path, line)) or " " in t.strip() or "@" in t
+            or any(c.isdigit() for c in t))
+
+
+PLACE = re.compile(r"\[([A-Z_]+?)_\d+\]")
+
+
+def replaced(orig: str, red: str) -> list[tuple[int, int, str]]:
+    """(start, end, label) of each original span replaced by a placeholder. The text between placeholders is
+    unchanged, so each literal chunk of `red` is found in `orig` in order; what lies between is replaced."""
+    out, i_o, i_r = [], 0, 0
+    marks = list(PLACE.finditer(red))
+    for n, m in enumerate(marks):
+        before = red[i_r:m.start()]
+        start = orig.find(before, i_o) + len(before) if before else i_o
+        after = red[m.end():marks[n + 1].start() if n + 1 < len(marks) else len(red)]
+        end = orig.find(after, start) if after else (len(orig) if n + 1 == len(marks) else start)
+        if start < len(before) or end < start:
+            return []  # could not align: the caller is conservative
+        out.append((start, end, m.group(1)))
+        i_o, i_r = end, m.end()
     return out
 
 
@@ -133,12 +126,11 @@ def run_model(texts: list[str]) -> list[tuple[str, list[str]]]:
     return [by_id[i] for i in range(len(texts))]
 
 
-def process(items: list[tuple], run=run_model) -> tuple[list[str], list[dict]]:
-    """Redact (path, line[, whole]) items in one batch. Returns the redacted lines and, per line, what was
-    found: {"secrets": [names], "labels": [Rampart labels]}."""
-    items = [(it[0], it[1], it[2] if len(it) > 2 else False) for it in items]
+def process(items: list[tuple[str, str]], run=run_model) -> tuple[list[str], list[dict]]:
+    """Redact (path, line) pairs in one batch. Returns the redacted lines and, per line, what was found:
+    {"secrets": [names], "labels": [reportable Rampart labels]}."""
     lines, found = [], []
-    for _, text, _ in items:
+    for _, text in items:
         hit = {"secrets": [], "labels": []}
         for name, pat in SECRETS:
             if pat.search(text):
@@ -146,12 +138,21 @@ def process(items: list[tuple], run=run_model) -> tuple[list[str], list[dict]]:
                 text = pat.sub("[SECRET]", text)
         lines.append(text)
         found.append(hit)
-    segs = [(i, x, y) for i, (path, _, whole) in enumerate(items) for a, b in spans(path, lines[i], whole)
-            for x, y in pieces(lines[i], a, b)]
+    segs = [(i, x, y) for i, line in enumerate(lines) for x, y in pieces(line, 0, len(line))]
     results = run([lines[i][x:y] for i, x, y in segs])
+    original = list(lines)
     for (i, x, y), (new, labels) in sorted(zip(segs, results, strict=True), key=lambda s: (s[0][0], -s[0][1])):
+        orig = original[i][x:y]
+        spans = replaced(orig, new) or [(0, len(orig), lb) for lb in labels]  # alignment failed: be conservative
+        groups: list[list] = []  # adjacent spans ("Priya" + "Ramanathan") are one detection
+        for a, b, lb in spans:
+            if groups and not orig[groups[-1][1]:a].strip():
+                groups[-1][1], groups[-1][2] = b, groups[-1][2] + [lb]
+            else:
+                groups.append([a, b, [lb]])
+        found[i]["labels"] += [lb for a, b, lbs in groups if reportable(items[i][0], original[i], x + a, x + b)
+                               for lb in lbs]
         lines[i] = lines[i][:x] + new.replace("\n", " ") + lines[i][y:]  # right to left keeps offsets valid
-        found[i]["labels"] += labels
     return lines, found
 
 
