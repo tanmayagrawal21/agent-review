@@ -22,27 +22,36 @@ prepare (checkout, redact locally) ─► bundle.json ─┬─ reviewer ─┐
 
    | secret | value |
    |---|---|
-   | `AGENT_REVIEW_API_KEY` | the key for your model endpoint |
-   | `AGENT_REVIEW_BASE_URL` | any OpenAI-compatible endpoint, e.g. `https://api.openai.com/v1` |
+   | `AGENT_REVIEW_API_KEY` | the key for your model provider |
+   | `AGENT_REVIEW_BASE_URL` | `https://api.anthropic.com`, or any OpenAI-compatible endpoint such as `https://api.openai.com/v1` |
    | `AGENT_REVIEW_MODEL` | the model id |
 
-   These are secrets, not config, so which provider and model a repo uses never appears in the public repo.
-3. Optional: [`examples/agent-review.yml`](examples/agent-review.yml) as `.github/agent-review.yml`, to turn
-   agents off, scope them to paths, make the check blocking, or add notes about the codebase.
+   They are secrets, not config, so the public repo never shows which provider or model you use. An Anthropic
+   endpoint is detected automatically; everything else is called as OpenAI-compatible.
+3. Open a pull request. The review appears as one comment within a few minutes.
 
-With no key, only the local privacy scan runs.
+Optional: copy [`examples/agent-review.yml`](examples/agent-review.yml) to `.github/agent-review.yml` to turn
+agents off, scope them to paths, make the check blocking, or give the agents notes about your codebase.
 
 ## Guarantees
 
-- **Redact first.** Personal data and keys are replaced on the runner before any text leaves it. If the
-  redactor can't run, nothing is sent.
-- **Agents are read-only.** They get a redacted bundle only: no checkout, no shell, no tools, no GitHub
-  token.
-- **A PR can't change its own review.** The config is read at the base commit, and each agent's result must
+- **Redact first.** Every line goes through secret patterns and the on-device PII model before any text
+  leaves the runner. If the redactor can't run, nothing is sent.
+- **Agents are read-only.** They see only the redacted bundle: no checkout, no tools, no GitHub token.
+- **A PR can't change its own review.** The config is read from the base branch, and each agent's result must
   match its name and the head commit.
-- **Humans merge.** The review is always a comment; `blocking: true` makes the check fail closed.
+- **Failures never approve.** An error, a truncated reply or an unreadable verdict counts as "not approved".
+- **Humans merge.** The review is a comment. Set `blocking: true` to make the check fail when something is
+  wrong or a review couldn't run.
 
-Details, diagrams and the trust model: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+## Limits
+
+- Diffs over `max_context_chars` (150k characters) aren't sent to a model: the PR gets a "not reviewed" note,
+  never a partial review. PRs over 1,000 changed lines get a warning.
+- Pull requests from forks get no secrets, so only the local privacy scan runs on them.
+- File names are not redacted. Keep personal data out of paths.
+
+How it works, with diagrams and the trust model: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Measured
 
