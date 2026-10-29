@@ -104,6 +104,42 @@ def test_merge_and_scrub_cover_other_providers():
     a = {"status": "ok", "verdict": "approve", "summary": "local", "findings": [], "cost_usd": 0}
     b = {"status": "ok", "verdict": "changes", "summary": "llm", "findings": [{"m": 1}], "cost_usd": 0.01}
     assert merge("privacy", "h", [a, b])["verdict"] == "changes"
-    assert merge("privacy", "h", [a, {"status": "error", "error": "x"}])["status"] == "error"
+    half = merge("privacy", "h", [b, {"status": "error", "error": "x", "findings": []}])
+    assert half["status"] == "error" and half["findings"] == [{"m": 1}]
     leaked = "sk-proj-" + "A" * 40 + " and ghp_" + "b" * 36
     assert "sk-proj-" not in json.dumps(scrub({"s": leaked}, [])) and "ghp_" not in json.dumps(scrub([leaked], []))
+
+
+def test_quoted_non_ascii_and_tabbed_paths_are_scanned():
+    from agent_review.privacy import added_lines, scan_added
+    diff = ('--- /dev/null\n+++ "b/caf\\303\\251.py"\n@@ -0,0 +1 @@\n+K = "Jane Roe-private"\n'
+            "--- a/a b.txt\t\n+++ b/a b.txt\t\n@@ -1 +1 @@\n-x\n+y\n")
+    assert [f for f, _, _ in added_lines(diff)] == ["café.py", "a b.txt"]
+    assert [(h.file, h.line) for h in scan_added(diff, ["Jane Roe-private"])] == [("café.py", 1)]
+
+
+def test_oversized_diff_is_not_reviewed(repo):
+    r, base, head = repo
+    cfg = load_text("engine: openai-compatible\nmodel: m\nbase_url: https://x.invalid/v1\nmax_context_chars: 10\n")
+    a = types.SimpleNamespace(agent="reviewer", repo=r, base=base, head=head)
+    opener, calls = opener_returning()
+    res = run_api(a, cfg, None, opener=opener)
+    assert res["status"] == "error" and "max_context_chars" in res["error"] and calls == []
+
+
+def test_localhost_lookalikes_are_rejected_and_node_gets_no_secrets(monkeypatch, tmp_path):
+    with pytest.raises(ConfigError):
+        load_text("base_url: http://localhost.evil.example/v1\n")
+    assert load_text("base_url: http://localhost:11434/v1\n")["base_url"]
+    (tmp_path / "node_modules" / "@nationaldesignstudio" / "rampart").mkdir(parents=True)
+    monkeypatch.setattr(local_pii, "JS", tmp_path)
+    monkeypatch.setenv("AGENT_REVIEW_API_KEY", "should-not-pass")
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw["env"])
+        return types.SimpleNamespace(returncode=0, stdout="[]", stderr="")
+    monkeypatch.setattr(local_pii.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError):  # node answered for none of the texts: incomplete, not "no PII"
+        local_pii.classify(["hello Priya"])
+    assert "AGENT_REVIEW_API_KEY" not in seen

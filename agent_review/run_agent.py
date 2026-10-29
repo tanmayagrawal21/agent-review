@@ -168,7 +168,10 @@ def run_api(a, cfg: dict, peers, opener=None) -> dict:
     diff = git("diff", f"{a.base}...{a.head}")
     files = [f for f in git("diff", "--name-only", "--diff-filter=AMR", f"{a.base}...{a.head}").splitlines() if f]
     budget = int(cfg["max_context_chars"])
-    inline = (f"<diff>\n{diff[:budget]}\n</diff>\n<commits>\n{git('log', '--format=%h %s%n%b', f'{a.base}..{a.head}')}"
+    if len(diff) > budget:  # never review a truncated diff: the hidden part could be the real change
+        return normalise(a.agent, a.head, None, error=f"diff is {len(diff)} chars, over max_context_chars; "
+                         "not reviewed")
+    inline = (f"<diff>\n{diff}\n</diff>\n<commits>\n{git('log', '--format=%h %s%n%b', f'{a.base}..{a.head}')}"
               f"\n</commits>\n" + llm_api.file_context(a.repo, a.head, files, max(0, budget - len(diff))))
     prompt = brief(a.agent, cfg, a.base, a.head, os.environ.get("PR_TITLE", ""), os.environ.get("PR_BODY", ""),
                    peers, inline=inline)
@@ -183,8 +186,9 @@ def run_api(a, cfg: dict, peers, opener=None) -> dict:
 def merge(agent: str, head: str, parts: list[dict]) -> dict:
     """Combine the local privacy scan with an LLM pass (privacy engine 'both')."""
     ok = [p for p in parts if p["status"] == "ok"]
-    if len(ok) < len(parts):
-        return {**next(p for p in parts if p["status"] != "ok"), "agent": agent, "sha": head}
+    if len(ok) < len(parts):  # not approved, but what the working half found is still shown
+        bad = next(p for p in parts if p["status"] != "ok")
+        return {**bad, "agent": agent, "sha": head, "findings": [f for p in ok for f in p["findings"]]}
     fs = [f for p in ok for f in p["findings"]]
     return {"agent": agent, "sha": head, "status": "ok", "findings": fs, "cost_usd": sum(p["cost_usd"] for p in ok),
             "verdict": "changes" if any(p["verdict"] == "changes" for p in ok) else "approve",

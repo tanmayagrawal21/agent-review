@@ -9,6 +9,7 @@ whole lines in text, docs and data files. Obviously fictional fixtures are maske
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -60,11 +61,14 @@ def classify(texts: list[str]) -> list[list[str]]:
     if not (JS / "node_modules" / "@nationaldesignstudio" / "rampart").exists():
         raise RuntimeError("local PII model not installed: run `npm ci --ignore-scripts` in agent_review/js")
     r = subprocess.run(["node", str(JS / "pii.mjs")], input=json.dumps([{"id": i, "text": t}
-                       for i, t in enumerate(texts)]), capture_output=True, text=True, timeout=900, cwd=JS)
+                       for i, t in enumerate(texts)]), capture_output=True, text=True, timeout=900, cwd=JS,
+                       env={k: os.environ[k] for k in ("PATH", "HOME", "TMPDIR", "LANG") if k in os.environ})
     if r.returncode:
         raise RuntimeError(f"local PII model failed: {r.stderr.strip()[-300:]}")
     by_id = {o["id"]: o["labels"] for o in json.loads(r.stdout)}
-    return [by_id.get(i, []) for i in range(len(texts))]
+    if set(by_id) != set(range(len(texts))):
+        raise RuntimeError("local PII model returned an incomplete result")
+    return [by_id[i] for i in range(len(texts))]
 
 
 def findings(diff: str, classify=classify) -> list[dict]:

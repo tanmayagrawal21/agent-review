@@ -4,6 +4,7 @@ reach a model, so a pull request cannot talk an agent into revealing them. Findi
 
 from __future__ import annotations
 
+import codecs
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,14 @@ class Hit:
     term: int  # 1-based index into the terms file
 
 
+def header_path(p: str) -> str:
+    """The new-side path of a '+++' header: git C-quotes unusual names and may append a tab."""
+    p = p.rstrip("\n").split("\t", 1)[0]
+    if p.startswith('"') and p.endswith('"'):
+        p = codecs.escape_decode(p[1:-1].encode())[0].decode("utf-8", "replace")
+    return p[2:] if p.startswith("b/") else ""
+
+
 HUNK = re.compile(r"@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
@@ -44,7 +53,7 @@ def walk(diff: str):
     for raw in diff.splitlines():
         if old_left <= 0 and new_left <= 0:
             if raw.startswith("+++ "):
-                file = raw[6:] if raw.startswith("+++ b/") else ""
+                file = header_path(raw[4:])
                 yield file, "header", None, ""
                 continue
             m = HUNK.match(raw)

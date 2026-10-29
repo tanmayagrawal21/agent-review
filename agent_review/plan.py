@@ -48,7 +48,8 @@ def decide(cfg: dict, files: list[str], lines: int, draft: bool, has_claude: boo
         needs_llm = not (name == "privacy" and a.get("engine") == "local")
         if needs_llm and not engine:
             missing.append(name)  # fork PRs get no secrets; a local privacy scan still runs
-            continue
+            if not (name == "privacy" and a.get("engine") == "both"):
+                continue
         agents.append(name)
     local = "privacy" in agents and cfg["agents"]["privacy"].get("engine") in ("local", "both")
     reason = f"no model credential for {', '.join(missing)} (fork PRs get no secrets)" if missing else ""

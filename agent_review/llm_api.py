@@ -8,6 +8,7 @@ the schema in the prompt instead, and anything unparseable is an error, never an
 
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import subprocess
@@ -47,11 +48,17 @@ def _extract(content: str) -> dict | None:
             return None
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):  # never resend the key to another URL
+        return None
+
+
+_open = urllib.request.build_opener(_NoRedirect).open
 UNSUPPORTED = {400, 404, 415, 422, 501}  # how providers say "not this request format"
 
 
 def call(base_url: str, model: str, key: str, system: str, user: str, schema: dict, timeout: int = 600,
-         opener=urllib.request.urlopen) -> dict:
+         opener=_open) -> dict:
     """Returns {"structured": dict|None, "usage": {...}, "error": str|None}. Tries a JSON-schema response, then
     plain JSON mode, then no format option, with the schema in the prompt for the last two."""
     url = base_url.rstrip("/") + "/chat/completions"
@@ -74,11 +81,12 @@ def call(base_url: str, model: str, key: str, system: str, user: str, schema: di
             if e.code in UNSUPPORTED:
                 continue
             return {"structured": None, "usage": {}, "error": f"HTTP {e.code} from the model endpoint"}
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as e:
             return {"structured": None, "usage": {}, "error": f"model endpoint unreachable ({type(e).__name__})"}
         try:
             text = d["choices"][0]["message"]["content"] or ""
-        except (KeyError, IndexError, TypeError):
-            return {"structured": None, "usage": d.get("usage") or {}, "error": "no message in the response"}
-        return {"structured": _extract(text), "usage": d.get("usage") or {}, "error": None}
+        except (KeyError, IndexError, TypeError, AttributeError):
+            return {"structured": None, "usage": {}, "error": "no message in the response"}
+        usage = d.get("usage") if isinstance(d.get("usage"), dict) else {}
+        return {"structured": _extract(str(text)), "usage": usage, "error": None}
     return {"structured": None, "usage": {}, "error": f"HTTP {code} from the model endpoint"}

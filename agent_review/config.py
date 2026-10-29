@@ -6,6 +6,7 @@ import copy
 import re
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 
@@ -63,7 +64,9 @@ def load_text(text: str) -> dict:
     if cfg["agents"]["privacy"].get("engine") not in ("local", "llm", "both"):
         raise ConfigError("agents.privacy.engine must be local, llm or both")
     url = str(cfg["base_url"])
-    if url and not (url.startswith("https://") or url.startswith(("http://localhost", "http://127.0.0.1"))):
+    parsed = urlparse(url)
+    local = parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1", "::1")
+    if url and not ((parsed.scheme == "https" and parsed.hostname) or local):
         raise ConfigError("base_url must be https (or http://localhost for a self-hosted model)")
     if cfg["model"] and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}", str(cfg["model"])):
         raise ConfigError("model must be a plain model name (e.g. gpt-5.1-mini, openai/gpt-4o, qwen3.5:9b)")
