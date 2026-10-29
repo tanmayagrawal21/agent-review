@@ -1,7 +1,7 @@
 [project]
 name = "agent-review"
 version = "0.1.0"
-description = "Automatic multi-agent PR review on GitHub Actions: reviewer, privacy and safety agents, one combined review."
+description = "One PR review from three agents (reviewer, safety, privacy) on GitHub Actions, with local redaction before any model."
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = ["pyyaml>=6"]
@@ -17,3 +17,6 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"bench/cases.py" = ["E501"]  # fixture source lines are kept verbatim
