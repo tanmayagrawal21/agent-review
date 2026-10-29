@@ -25,21 +25,23 @@ _open = urllib.request.build_opener(_NoRedirect).open
 
 
 def extract(content: str) -> dict | None:
-    """The JSON object in a reply: bare, fenced, or surrounded by prose that may itself contain braces. Prefers
-    an object with a "verdict"."""
-    dec, found = json.JSONDecoder(), []
-    for i, ch in enumerate(content):
-        if ch != "{":
-            continue
+    """The answer object in a reply: bare, fenced, or surrounded by prose that may contain braces. Only top-level
+    objects count (an echoed schema's nested "verdict" is not one); the last object with a verdict wins, and
+    objects with conflicting verdicts are no answer at all (fail closed)."""
+    dec, found, i = json.JSONDecoder(), [], content.find("{")
+    while i != -1:
         try:
-            d, _ = dec.raw_decode(content, i)
+            d, end = dec.raw_decode(content, i)
         except json.JSONDecodeError:
+            i = content.find("{", i + 1)
             continue
         if isinstance(d, dict):
-            if "verdict" in d:
-                return d
             found.append(d)
-    return found[0] if found else None
+        i = content.find("{", end)
+    verdicts = [d for d in found if "verdict" in d]
+    if len({json.dumps(d.get("verdict")) for d in verdicts}) > 1:
+        return None
+    return (verdicts or found or [None])[-1]
 
 
 def _post(url: str, body: dict, headers: dict, opener, timeout: int) -> dict:
@@ -68,6 +70,7 @@ def call(cfg: dict, key: str, system: str, user: str, schema: dict, opener=_open
     asked = user + f"\n\nReply with only a JSON object matching this JSON Schema:\n{json.dumps(schema)}"
     base = cfg["base_url"].rstrip("/")
     host = urlparse(base).hostname or ""
+    # an Anthropic host always uses the Messages API, even if `api: openai` is set
     api = "anthropic" if host == "anthropic.com" or host.endswith(".anthropic.com") else cfg["api"]
     try:
         if api == "anthropic":  # no temperature: newer models reject it

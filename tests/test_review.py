@@ -99,3 +99,13 @@ def test_verdict_is_found_in_prose_that_contains_braces():
     from agent_review.llm import extract
     reply = "Checked `cfg = {**a}` and `{x}`.\n```json\n" + json.dumps(OK) + "\n```\nAlso see {notes}."
     assert extract(reply)["verdict"] == "approve"
+
+
+def test_an_example_verdict_or_echoed_schema_never_wins():
+    from agent_review.llm import extract
+    real = json.dumps({"verdict": "changes", "summary": "s", "findings": []})
+    assert extract('Format: {"verdict": "approve"}\n' + real) is None  # conflicting verdicts: fail closed
+    same = 'e.g. {"verdict": "changes"} then ' + real
+    assert extract(same)["summary"] == "s"  # the last top-level object wins
+    schema = json.dumps({"type": "object", "properties": {"verdict": {"type": "string"}}})
+    assert extract(schema + "\n" + real)["verdict"] == "changes"  # nested schema "verdict" is not an answer
