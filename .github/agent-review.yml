@@ -1,0 +1,7 @@
+# Config for agent-review's own PRs. Set `model` (and base_url, or the AGENT_REVIEW_BASE_URL secret) and add the
+# AGENT_REVIEW_API_KEY secret to turn the model agents on; until then only the local privacy scan runs.
+api: openai
+model: ""
+instructions: |
+  agent-review is security tooling: treat anything that could leak a secret, send unredacted text to a model,
+  or let a PR change its own review as blocking.
