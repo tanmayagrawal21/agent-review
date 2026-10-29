@@ -29,7 +29,7 @@ flowchart TD
 
     B --> RV["② Reviewer<br/>correctness · tests"]
     B --> SF["② Safety<br/>controls · limits"]
-    B --> PV["② Privacy<br/>what Rampart missed"]
+    B --> PV["② Privacy<br/>other privacy risks"]
 
     RV --> PB
     SF --> PB
@@ -83,7 +83,7 @@ flowchart TD
        X --> F["skip obvious fakes<br/>example.com · Jane Doe · 555-01xx"]
        F --> M["Rampart<br/>(on-device, CC BY 4.0)"]
        M --> O["placeholders<br/>[GIVEN_NAME_1] [EMAIL_1] [SSN_1]"]
-       M --> FN["local findings<br/>in code: only inside strings/comments<br/>or data-like (words, digits, @)<br/>IDs/financial: blocking · names, emails: suggestion"]
+       M --> FN["local findings: never blocking<br/>highlighted in place on the line<br/>names only if name-shaped;<br/>in code only in strings/comments or data-like"]
    ```
 
    - **Secret patterns** cover the formats Rampart does not detect: Anthropic, OpenAI, Stripe, GitHub,
@@ -138,11 +138,11 @@ sequenceDiagram
   | lane | owner |
   |---|---|
   | correctness, behaviour, compatibility, tests | reviewer |
-  | secrets and personal data the local scan missed, or code that exposes them at runtime | privacy |
+  | other privacy risks: secrets in unusual formats, runtime exposure of data, names in file paths, home paths, internal hosts | privacy |
   | auth, permissions, approvals, limits, validation at trust boundaries, fail-open, bugs that weaken a control | safety |
 
-- **The privacy agent sees the local findings** and is told not to repeat them. Its job is what Rampart
-  and the patterns missed.
+- **The privacy agent does not look for personal data.** Rampart reports that locally; the model covers
+  other privacy risks and is told which lines Rampart already flagged.
 - **The output schema** is `verdict`, `summary`, and `findings[]` with `file`, `line`, `code` (the exact
   line), `severity` (`blocking` or `suggestion`), `category` and `message`. Anything else, such as no JSON,
   the wrong shape or an HTTP error, becomes `status: error`, which is never an approval.
@@ -155,7 +155,10 @@ sequenceDiagram
 
 1. **Integrity:** each agent's file must name that agent and the head commit. A missing, stale or forged
    file becomes "did not complete, not approved".
-2. **Privacy = local findings + the model's extra findings.** With no key, the local findings stand alone.
+2. **Privacy = Rampart's findings + the model's other concerns, in one section.** The section opens with "N
+   line(s) with potential PII", a reminder that these are never blocking and may be wrong, and one comment
+   per line with the detected text underlined in place. Provider-format secrets stay masked as `[SECRET]` and
+   are blocking. With no key, the local findings stand alone.
 3. **Anchoring:** models misnumber lines, but their quoted `code` is reliable. Each finding moves to the
    line holding that text (in the redacted file, so placeholders match).
 4. **One comment per line,** crediting every agent that flagged it. Findings that GitHub can't anchor,

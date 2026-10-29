@@ -46,8 +46,9 @@ def test_bundle_is_redacted_and_carries_the_local_findings(repo):
         assert raw not in text, raw
     assert "[SECRET]" in b["files"]["app.py"] and b["redacted"] is True
     cats = sorted({(f["line"], f["category"]) for f in b["local_findings"] if f["file"] == "app.py"})
-    assert (1, "personal data") in cats and (2, "personal data") in cats and (3, "GitHub token") in cats
-    assert [f["severity"] for f in b["local_findings"] if f["line"] == 2] == ["blocking"]  # SSN blocks
+    assert (1, "potential PII") in cats and (2, "potential PII") in cats and (3, "GitHub token") in cats
+    sev = {(f["line"], f["category"]): f["severity"] for f in b["local_findings"] if f["file"] == "app.py"}
+    assert sev[(2, "potential PII")] == "suggestion" and sev[(3, "GitHub token")] == "blocking"
     assert b["config"]["model"] == "m" and "key" not in json.dumps(b["config"]).lower()
 
 
@@ -101,4 +102,4 @@ def test_a_docstring_fixture_is_redacted_in_the_diff_and_the_file(repo):
     head = git(r, "rev-parse", "HEAD")
     b = build(r, base, head, CFG, decide(CFG, ["fx.py"], 3, False, True), "", "", run=model)
     assert "Ramanathan" not in b["diff"] and "Ramanathan" not in b["files"]["fx.py"] and "472-81" not in b["diff"]
-    assert any(f["file"] == "fx.py" and f["severity"] == "blocking" for f in b["local_findings"])
+    assert any(f["file"] == "fx.py" and f["category"] == "potential PII" for f in b["local_findings"])

@@ -43,13 +43,29 @@ def test_secrets_are_redacted_before_the_model_sees_the_line():
     assert not any("ghp_" in t for t in seen)
 
 
-def test_findings_policy():
-    f = pii.findings("a.py", 3, {"secrets": [], "labels": ["SSN", "GIVEN_NAME"]})
-    assert [(x["severity"], x["category"]) for x in f] == [("blocking", "personal data")]
-    soft = pii.findings("a.py", 1, {"secrets": [], "labels": ["EMAIL", "URL"]})
-    assert [x["severity"] for x in soft] == ["suggestion"]
-    card = pii.findings("a.py", 1, {"secrets": ["Stripe secret key"], "labels": ["CREDIT_CARD"]})
-    assert [x["category"] for x in card] == ["Stripe secret key"]  # a key is not also reported as a card
+def test_findings_policy_rampart_pii_is_never_blocking():
+    hit = {"secrets": [], "labels": ["SSN", "GIVEN_NAME"], "line": 'x = "Ann Lee 472-81-0094"',
+           "spans": [(5, 12, ["GIVEN_NAME", "SURNAME"]), (13, 24, ["SSN"])]}
+    f = pii.findings("a.py", 3, hit)
+    assert [(x["severity"], x["category"]) for x in f] == [("suggestion", "potential PII")]  # one per line
+    assert "can be wrong; check it yourself" in f[0]["message"]
+    card = pii.findings("a.py", 1, {"secrets": ["Stripe secret key"], "labels": ["CREDIT_CARD"], "line": "k",
+                                    "spans": [(0, 1, ["CREDIT_CARD"])]})
+    assert [(x["severity"], x["category"]) for x in card] == [("blocking", "Stripe secret key")]
+
+
+def test_only_name_shaped_text_is_reported_as_a_name():
+    assert pii.plausible("Priya Ramanathan", ["GIVEN_NAME", "SURNAME"])
+    for code in ('" "] * len', "detected", "OTHER", "verdicts"):
+        assert not pii.plausible(code, ["GIVEN_NAME"])
+    assert pii.plausible("472-81-0094", ["SSN"])
+
+
+def test_highlight_survives_backticks_and_tabs():
+    out = pii.highlight("\tsee ```Ann Lee```", [(8, 15, ["GIVEN_NAME"])])
+    assert out.startswith("\n````\n") and out.endswith("\n````")
+    line, carets = out.split("\n")[2:4]
+    assert line[carets.index("^"):carets.index("^") + 7] == "Ann Lee"
 
 
 def test_scrub_and_missing_model(monkeypatch, tmp_path):
@@ -102,3 +118,10 @@ def test_fictional_values_are_not_reported_and_source_placeholders_are_ignored()
         return [(t.replace("Jane Doe", "[GIVEN_NAME_1]"), ["GIVEN_NAME"] if "Jane Doe" in t else []) for t in texts]
     _, found = pii.process([("t.py", 'u = "Jane Doe"'), ("t.py", 'x = "[SSN_1]"')], tag)
     assert found[0]["labels"] == [] and found[1]["labels"] == []
+
+
+def test_findings_highlight_the_detected_text_in_place():
+    lines, found = pii.process([("a.py", 'OWNER = "Priya Ramanathan"  # see ghp_' + "a" * 36)], model)
+    msg = pii.findings("a.py", 1, found[0])[-1]["message"]
+    assert 'OWNER = "Priya Ramanathan"  # see [SECRET]' in msg  # PII shown and underlined, secret still masked
+    assert "^^^^^^^^^^^^^^^^ name" in msg and "ghp_" not in msg

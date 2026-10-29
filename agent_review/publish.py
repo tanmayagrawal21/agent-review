@@ -45,14 +45,23 @@ def results(bundle: dict, findings_dir: Path) -> list[dict]:
     if bundle.get("privacy"):
         local = bundle["local_findings"]
         llm = next((r for r in out if r["agent"] == "privacy"), None)
-        summary = f"Local scan (Rampart on-device PII model + secret patterns): {len(local)} finding(s)."
+        n_pii = len({(f["file"], f["line"]) for f in local if f.get("category") == "potential PII"})
+        n_sec = sum(f.get("category") != "potential PII" for f in local)
+        summary = (f"**{n_pii} line(s) with potential PII** flagged by Rampart, an on-device model. These are never "
+                   "blocking and may be wrong: check each highlighted line yourself." if n_pii else
+                   "Rampart, an on-device PII model, flagged nothing (it can miss things).")
+        if n_sec:
+            summary += f" {n_sec} secret(s) in a provider format."
         if llm is None:
             out.append({"agent": "privacy", "status": "ok", "summary": summary + f" No model pass: {why}.",
                         "findings": local, "tokens": ZERO, "engine": "local",
                         "verdict": "changes" if any(f["severity"] == "blocking" for f in local) else "approve"})
         else:
             llm["findings"] = local + llm["findings"]
-            llm["summary"] = f"{summary} {llm['summary']}".strip()
+            if llm["summary"]:
+                llm["summary"] = f"{summary}\n\nOther privacy concerns: {llm['summary']}"
+            else:
+                llm["summary"] = summary
             if llm["status"] == "ok" and any(f["severity"] == "blocking" for f in local):
                 llm["verdict"] = "changes"
     return sorted(out, key=lambda r: AGENTS.index(r["agent"]))
@@ -93,10 +102,15 @@ def build(rs: list[dict], bundle: dict) -> tuple[dict, bool]:
             "| agent | result | blocking | suggestions | tokens in / cached / out |", "|---|---|---|---|---|", *rows,
             f"| **total** | | | | **{total['input']:,} / {total['cached']:,} / {total['output']:,}** |"]
     by_line: dict[tuple, list] = {}
+    seen: set = set()
     loose = []
     for r in rs:
         for f in anchor(r["findings"], bundle["files"]):
             key = (f.get("file") or "", f.get("line"))
+            ident = (r["agent"], *key, f.get("category"), f.get("message"))
+            if ident in seen:  # the same finding twice (e.g. a line repeated in the diff) is one comment
+                continue
+            seen.add(ident)
             if key[1] and key[1] in lines.get(key[0], set()):
                 by_line.setdefault(key, []).append((r["agent"], f))
             else:
