@@ -16,4 +16,4 @@ permissions:
 jobs:
   review:
     uses: tanmayagrawal21/agent-review/.github/workflows/review.yml@v1
-    secrets: inherit   # AGENT_REVIEW_API_KEY, optional AGENT_REVIEW_BASE_URL
+    secrets: inherit   # AGENT_REVIEW_API_KEY, AGENT_REVIEW_BASE_URL, AGENT_REVIEW_MODEL

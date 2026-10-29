@@ -1,8 +1,5 @@
-# Config for agent-review's own PRs, using the University of Arizona AI Assistant (OpenAI-compatible LiteLLM
-# proxy). Needs the AGENT_REVIEW_API_KEY secret; without it only the local privacy scan runs.
-api: openai
-base_url: https://ai-assistant.responsibleai.arizona.edu/v1
-model: gpt-6.1-sol
+# Config for agent-review's own PRs. The endpoint, model and key are repository secrets
+# (AGENT_REVIEW_BASE_URL, AGENT_REVIEW_MODEL, AGENT_REVIEW_API_KEY), never in this public file.
 instructions: |
   agent-review is security tooling: treat anything that could leak a secret, send unredacted text to a model,
   or let a PR change its own review as blocking.

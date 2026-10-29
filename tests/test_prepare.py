@@ -18,7 +18,7 @@ def test_decide():
     assert decide(CFG, files, 10, False, True)["agents"] == ["reviewer", "privacy", "safety"]
     keyless = decide(CFG, files, 10, False, False)
     assert keyless["agents"] == [] and keyless["local"] and keyless["gap"] == ["reviewer", "privacy", "safety"]
-    assert decide(parse("model: m\n"), files, 10, False, True, has_url=True)["agents"]  # URL from a secret
+    assert decide(parse(""), files, 10, False, True, has_url=True, has_model=True)["agents"]  # all from secrets
     assert decide(CFG, files, 10, True, True)["agents"] == [] and decide(CFG, files, 10, True, True)["gap"] == []
     assert decide(CFG, files, 5000, False, True)["gap"] == ["reviewer", "privacy", "safety"]
     scoped = parse("base_url: https://x.example/v1\nmodel: m\nagents:\n  safety: {paths: ['auth/*']}\n")
