@@ -58,3 +58,13 @@ def test_model_process_gets_no_secrets_and_incomplete_output_is_an_error(monkeyp
     with pytest.raises(RuntimeError, match="incomplete"):
         pii.run_model(["hello"])
     assert "AGENT_REVIEW_API_KEY" not in seen
+
+
+def test_unknown_formats_are_whole_line_and_spans_never_overlap():
+    assert pii.spans("contact.vcf", "FN:Priya Ramanathan") == [(0, 19)]
+    assert pii.spans("notes", "anything") == [(0, 8)]
+    line = '# hi "Hannah Castellanos" ok'
+    assert pii.spans("a.py", line) == [(2, len(line))]
+    lines, _ = pii.process([("a.py", line), ("a.py", 'x = "Priya Ramanathan"  # and "Priya Ramanathan"')], model)
+    assert lines[0] == '# hi "[GIVEN_NAME_1]" ok'
+    assert lines[1] == 'x = "[GIVEN_NAME_1]"  # and "[GIVEN_NAME_1]"'
