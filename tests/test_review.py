@@ -75,3 +75,9 @@ def test_endpoint_and_model_from_secrets_and_never_echoed(monkeypatch):
     r = review.run("reviewer", {**BUNDLE, "config": {**BUNDLE["config"], "base_url": "", "model": ""}}, "k", o)
     assert calls[0][0] == "https://private.example/v1/chat/completions" and calls[0][2]["model"] == "secret-model-7"
     assert "secret-model-7" not in json.dumps(r)
+
+
+def test_an_agent_prepare_did_not_schedule_sends_nothing():
+    o, calls = opener()
+    r = review.run("safety", {**BUNDLE, "agents": ["reviewer"]}, "k", o)
+    assert r["status"] == "error" and calls == []
