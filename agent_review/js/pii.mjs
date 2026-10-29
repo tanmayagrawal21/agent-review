@@ -11,6 +11,7 @@ const guard = await createGuard({ device: "cpu" });
 const out = [];
 for (const { id, text } of items) {
   const r = await guard.protect(text);
-  out.push({ id, text: r.text, labels: [...r.text.matchAll(/\[([A-Z_]+?)_\d+\]/g)].map((m) => m[1]) });
+  // labels from Rampart's own placeholder list, so a literal "[EMAIL_1]" already in the text is not a finding
+  out.push({ id, text: r.text, labels: (r.placeholders || []).map((p) => p.replace(/^\[|_\d+\]$/g, "")) });
 }
 process.stdout.write(JSON.stringify(out));
