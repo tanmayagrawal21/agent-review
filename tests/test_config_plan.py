@@ -30,4 +30,8 @@ def test_plan_scopes_and_skips(repo):
     assert decide(cfg, ["auth/login.py"], 5, False, True)["agents"] == ["reviewer", "privacy", "safety"]
     assert decide(cfg, files, lines, True, True)["run"] is False  # draft
     assert decide(cfg, files, 5000, False, True)["run"] is False  # too large
-    assert "fork" in decide(cfg, files, lines, False, False)["reason"]  # no secret
+    keyless = decide(cfg, files, lines, False, False)
+    assert keyless["agents"] == ["privacy"] and keyless["local"] and "fork" in keyless["reason"]  # local scan only
+    assert decide(cfg, files, lines, False, True)["engine"] == "claude-code"
+    api = load_text("base_url: https://api.example.com/v1\nmodel: m\n")
+    assert decide(api, files, lines, False, False, has_api=True)["engine"] == "openai-compatible"

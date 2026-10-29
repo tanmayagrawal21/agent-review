@@ -1,0 +1,10 @@
+{
+  "name": "agent-review-local-pii",
+  "private": true,
+  "type": "module",
+  "description": "Local PII detection for agent-review's privacy lane (Rampart, CC BY 4.0, National Design Studio)",
+  "dependencies": {
+    "@huggingface/transformers": "3.8.1",
+    "@nationaldesignstudio/rampart": "0.1.3"
+  }
+}

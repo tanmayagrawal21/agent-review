@@ -23,14 +23,21 @@ def changed(repo: Path, base: str, head: str) -> tuple[list[str], int]:
     return files, lines
 
 
-def decide(cfg: dict, files: list[str], lines: int, draft: bool, has_key: bool) -> dict:
-    if not has_key:
-        return {"run": False, "agents": [], "reason": "no Claude credential (fork PRs get no secrets)"}
+def llm_engine(cfg: dict, has_claude: bool, has_api: bool) -> str | None:
+    if cfg["engine"] == "auto":
+        return "openai-compatible" if has_api and cfg["base_url"] else "claude-code" if has_claude else None
+    ok = {"openai-compatible": has_api and bool(cfg["base_url"]), "claude-code": has_claude}[cfg["engine"]]
+    return cfg["engine"] if ok else None
+
+
+def decide(cfg: dict, files: list[str], lines: int, draft: bool, has_claude: bool, has_api: bool = False) -> dict:
+    engine = llm_engine(cfg, has_claude, has_api)
+    none = {"run": False, "agents": [], "engine": engine or "", "local": False}
     if draft and cfg["skip"]["draft"]:
-        return {"run": False, "agents": [], "reason": "draft PR"}
+        return {**none, "reason": "draft PR"}
     if cfg["skip"]["max_changed_lines"] and lines > cfg["skip"]["max_changed_lines"]:
-        return {"run": False, "agents": [], "reason": f"{lines} changed lines exceeds skip.max_changed_lines"}
-    agents = []
+        return {**none, "reason": f"{lines} changed lines exceeds skip.max_changed_lines"}
+    agents, missing = [], []
     for name in AGENTS:
         a = cfg["agents"][name]
         if not a.get("enabled"):
@@ -38,8 +45,17 @@ def decide(cfg: dict, files: list[str], lines: int, draft: bool, has_key: bool) 
         paths = a.get("paths") or []
         if paths and not any(fnmatch.fnmatch(f, p) for f in files for p in paths):
             continue
+        needs_llm = not (name == "privacy" and a.get("engine") == "local")
+        if needs_llm and not engine:
+            missing.append(name)  # fork PRs get no secrets; a local privacy scan still runs
+            continue
         agents.append(name)
-    return {"run": bool(agents), "agents": agents, "reason": "" if agents else "no agent in scope"}
+    local = "privacy" in agents and cfg["agents"]["privacy"].get("engine") in ("local", "both")
+    reason = f"no model credential for {', '.join(missing)} (fork PRs get no secrets)" if missing else ""
+    if not agents:
+        reason = reason or "no agent in scope"
+    return {"run": bool(agents), "agents": agents, "engine": engine or "", "local": local, "reason": reason,
+            "missing": missing}
 
 
 def main() -> int:
@@ -49,21 +65,23 @@ def main() -> int:
     ap.add_argument("--base", required=True)
     ap.add_argument("--head", required=True)
     ap.add_argument("--draft", default="false")
-    ap.add_argument("--has-key", default="false")
+    ap.add_argument("--has-key", default="false", help="a Claude credential is available")
+    ap.add_argument("--has-api-key", default="false", help="AGENT_REVIEW_API_KEY is available")
     a = ap.parse_args()
     cfg = load_at(a.repo, a.base, a.config)
     files, lines = changed(a.repo, a.base, a.head)
-    d = decide(cfg, files, lines, a.draft == "true", a.has_key == "true")
+    d = decide(cfg, files, lines, a.draft == "true", a.has_key == "true", a.has_api_key == "true")
     print(json.dumps(d))
     if out := os.environ.get("GITHUB_OUTPUT"):
         with open(out, "a") as fh:
-            fh.write(f"run={str(d['run']).lower()}\nagents={json.dumps(d['agents'])}\n")
-    if not d["run"]:
-        # blocking mode fails closed: an unreviewed PR must not pass (drafts can't merge, so they are exempt)
-        fail = cfg["blocking"] and d["reason"] not in ("draft PR", "no agent in scope")
-        print(f"::{'error' if fail else 'notice'}::agent-review skipped: {d['reason']}")
-        return 1 if fail else 0
-    return 0
+            fh.write(f"run={str(d['run']).lower()}\nagents={json.dumps(d['agents'])}\nengine={d['engine']}\n"
+                     f"local={str(d['local']).lower()}\n")
+    # blocking mode fails closed: a PR that some enabled agent could not review must not pass
+    # (drafts can't merge, so they are exempt; an agent out of scope by path is not a gap)
+    gap = (not d["run"] and d["reason"] not in ("draft PR", "no agent in scope")) or bool(d.get("missing"))
+    if d["reason"]:
+        print(f"::{'error' if cfg['blocking'] and gap else 'notice'}::agent-review: {d['reason']}")
+    return 1 if cfg["blocking"] and gap else 0
 
 
 if __name__ == "__main__":

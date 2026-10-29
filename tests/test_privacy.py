@@ -29,3 +29,8 @@ def test_redact():
 def test_an_added_line_starting_with_plus_plus_is_not_a_file_header():
     diff = "--- a/x\n+++ b/x\n@@ -1 +1,2 @@\n keep\n+++ Jane Doe\n"
     assert [(h.file, h.line) for h in scan_added(diff, ["Jane Doe"])] == [("x", 2)]
+
+
+def test_a_removed_sql_comment_then_added_plus_plus_line_is_scanned():
+    diff = "--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,2 @@\n keep\n--- old comment\n+++ Jane Doe\n"
+    assert [(h.file, h.line) for h in scan_added(diff, ["Jane Doe"])] == [("q.sql", 2)]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 import subprocess
 from pathlib import Path
 
@@ -13,11 +14,14 @@ AGENTS = ("reviewer", "privacy", "safety")
 DEFAULTS: dict = {
     "agents": {
         "reviewer": {"enabled": True},
-        "privacy": {"enabled": True},
+        "privacy": {"enabled": True, "engine": "local"},  # local (no LLM) | llm | both
         "safety": {"enabled": True, "paths": []},  # empty = every PR; globs scope it to matching files
     },
     "blocking": False,  # advisory by default: the check stays green and humans decide
-    "model": "sonnet",
+    "engine": "auto",  # auto | openai-compatible | claude-code; auto picks by the credential the repo has
+    "model": "",  # required for openai-compatible (e.g. gpt-5.1-mini, gemini-3-flash); claude-code: sonnet
+    "base_url": "",  # openai-compatible endpoint, e.g. https://api.openai.com/v1, https://openrouter.ai/api/v1
+    "max_context_chars": 150_000,  # openai-compatible: diff + changed files sent to the model
     "max_budget_usd": 1.0,  # per agent per run
     "skip": {"draft": True, "max_changed_lines": 2000},
     "instructions": "",  # repo-specific notes every agent reads (conventions, risky areas)
@@ -54,6 +58,13 @@ def load_text(text: str) -> dict:
     cfg = _merge(DEFAULTS, raw or {})
     if not isinstance(cfg["agents"]["safety"].get("paths", []), list):
         raise ConfigError("agents.safety.paths must be a list of globs")
-    if cfg["model"] and not str(cfg["model"]).replace("-", "").replace(".", "").isalnum():
-        raise ConfigError("model must be a plain model name")
+    if cfg["engine"] not in ("auto", "openai-compatible", "claude-code"):
+        raise ConfigError("engine must be auto, openai-compatible or claude-code")
+    if cfg["agents"]["privacy"].get("engine") not in ("local", "llm", "both"):
+        raise ConfigError("agents.privacy.engine must be local, llm or both")
+    url = str(cfg["base_url"])
+    if url and not (url.startswith("https://") or url.startswith(("http://localhost", "http://127.0.0.1"))):
+        raise ConfigError("base_url must be https (or http://localhost for a self-hosted model)")
+    if cfg["model"] and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}", str(cfg["model"])):
+        raise ConfigError("model must be a plain model name (e.g. gpt-5.1-mini, openai/gpt-4o, qwen3.5:9b)")
     return cfg
