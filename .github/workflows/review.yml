@@ -80,10 +80,11 @@ jobs:
           python -m agent_review.prepare --repo ../pr --base "$BASE" --head "$HEAD" --config "$CONFIG"
           --draft "$DRAFT" --out ../bundle/bundle.json
       - uses: actions/upload-artifact@v4
-        if: steps.prepare.outputs.run == 'true'
+        if: always() && steps.prepare.outputs.run == 'true'   # also when blocking mode fails the job
         with:
           name: bundle
           path: bundle/bundle.json
+          retention-days: 1
 
   review:
     needs: prepare
@@ -121,10 +122,11 @@ jobs:
           name: findings-${{ matrix.agent }}
           path: out/${{ matrix.agent }}.json   # only this agent's own file
           if-no-files-found: ignore
+          retention-days: 1
 
   publish:
     needs: [prepare, review]
-    if: ${{ !cancelled() && needs.prepare.outputs.run == 'true' }}
+    if: ${{ !cancelled() && needs.prepare.outputs.run == 'true' }}   # runs even when prepare failed closed
     runs-on: ubuntu-latest
     permissions:
       contents: read
