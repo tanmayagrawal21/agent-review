@@ -142,3 +142,5 @@ def test_real_ids_next_to_colons_or_emails_are_still_reported():
         assert pii.plausible(value, ["SSN"], line, line.index(value)), line
     whole = "contact jane@realmail.com: 472-81-0094"  # alignment fallback: the whole line is the span
     assert pii.plausible(whole, ["SSN"], whole, 0)
+    glued = "jane@example.com:472-81-0094"
+    assert pii.plausible("472-81-0094", ["SSN"], glued, glued.index("472"))

@@ -151,22 +151,19 @@ DISCLAIMER = ("Rampart is an on-device model and can be wrong; check it yourself
 
 ID_LABELS = {"SSN", "CREDIT_CARD", "BANK_ACCOUNT", "ROUTING_NUMBER", "TAX_ID", "PASSPORT", "DRIVERS_LICENSE",
              "GOVERNMENT_ID"}
-CODE_TOKEN = re.compile(r"[\w.:-]*[/@][\w./@:-]*")  # paths, URLs, owner/repo@ref (a bare ":" is not code)
-
-
 def plausible(text: str, labels: list[str], line: str = "", start: int = 0) -> bool:
     """Whether a detection is worth reporting (it is redacted either way). Names must be name-shaped
-    (capitalised words). ID-type detections must look like an ID (at least 5 digits) and not sit inside a path,
-    URL or `owner/repo@ref`, which the model often mistakes for licences or account numbers."""
+    (capitalised words). ID-type detections must look like an ID (at least 5 digits) and not be a path segment
+    or an `@ref` (directly after "/" or "@"), which the model often mistakes for licences or account numbers."""
     t = text.strip()
     if set(labels) <= {"GIVEN_NAME", "SURNAME"}:
         return bool(NAMEISH.fullmatch(t))
     if set(labels) & ID_LABELS and not set(labels) - ID_LABELS:
         if sum(c.isdigit() for c in t) < 5:
             return False
-        for m in CODE_TOKEN.finditer(line):
-            if m.start() <= start and start + len(text) <= m.end():  # only if the whole detection is inside
-                return False
+        token = not any(c.isspace() for c in t)  # one token: a ref or path segment, never a multi-word span
+        if token and (set(t) & set("/@") or (start > 0 and line[start - 1] in "/@")):
+            return False
     return True
 
 
