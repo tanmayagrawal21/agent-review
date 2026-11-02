@@ -112,7 +112,7 @@ def test_privacy_section_counts_rampart_pii_and_keeps_other_concerns(tmp_path):
 
 def test_old_inline_comments_are_cleared_except_threads_humans_replied_to():
     from agent_review.publish import BOT, stale
-    bot, human = {"login": BOT}, {"login": "michellito"}
+    bot, human = {"login": BOT}, {"login": "jane-doe-reviewer"}
     comments = [
         {"id": 1, "pull_request_review_id": 10, "user": bot},  # old run: delete
         {"id": 2, "pull_request_review_id": 10, "user": bot},  # old run, but a human replied: keep
