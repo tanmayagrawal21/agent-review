@@ -17,3 +17,11 @@ can point to the path. Anything uncertain is a "suggestion". NEVER repeat a sens
 the category only. Verdict "changes" if anything is blocking. The summary is one or two sentences, about your
 lane only.
 For every finding with a line, copy that line's exact text into "code" (replace any secret value with "…").
+
+Keep the review short and precise:
+- Report at most 5 findings, most important first. Report each issue once, at its most relevant line, even if
+  it appears in several places (say "also at ..." in the message).
+- "blocking" only for a concrete defect this PR introduces or makes worse than the base branch. Deliberate,
+  documented settings (advisory mode, feature flags, opt-outs) and known platform limits (for example, fork PRs
+  get no secrets) are never blocking; mention them only if the PR gets them wrong.
+- No praise, no restating the diff, no speculative "consider" items without a concrete reason.

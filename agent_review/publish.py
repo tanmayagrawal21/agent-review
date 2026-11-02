@@ -178,6 +178,8 @@ def post(repo: str, pr: int, review: dict) -> None:
         extra = "\n".join(f"- `{c['path']}:{c['line']}` {c['body']}" for c in review["comments"])
         body = (review["body"] + "\n\n### Inline findings\n" + extra)[:MAX_BODY]
         new = json.loads(gh(base, "--method", "POST", payload={**review, "comments": [], "body": body}) or "{}")
+    if not new.get("id"):  # cannot tell the new review from old ones: leave everything in place
+        return
     old = [rv for page in json.loads(gh(base, "--paginate", "--slurp") or "[]") for rv in page
            if MARKER in (rv.get("body") or "") and (rv.get("user") or {}).get("login") == BOT
            and rv.get("id") != new.get("id")]

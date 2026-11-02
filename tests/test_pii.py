@@ -125,3 +125,11 @@ def test_findings_highlight_the_detected_text_in_place():
     msg = pii.findings("a.py", 1, found[0])[-1]["message"]
     assert 'OWNER = "Priya Ramanathan"  # see [SECRET]' in msg  # PII shown and underlined, secret still masked
     assert "^^^^^^^^^^^^^^^^ name" in msg and "ghp_" not in msg
+
+
+def test_id_detections_inside_paths_and_refs_are_not_reported():
+    line = "    uses: owner/agent-review/.github/workflows/review.yml@de9411ac562778b476cf8b8288d257b0314ed15d"
+    start = line.index("de9411")
+    assert not pii.plausible("de9411ac562778b476cf8b8288d257b0314ed15d", ["DRIVERS_LICENSE"], line, start)
+    assert not pii.plausible("review", ["DRIVERS_LICENSE"], "review", 0)  # too few digits to be an ID
+    assert pii.plausible("D1234567", ["DRIVERS_LICENSE"], 'licence = "D1234567"', 11)
