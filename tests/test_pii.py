@@ -133,3 +133,12 @@ def test_id_detections_inside_paths_and_refs_are_not_reported():
     assert not pii.plausible("de9411ac562778b476cf8b8288d257b0314ed15d", ["DRIVERS_LICENSE"], line, start)
     assert not pii.plausible("review", ["DRIVERS_LICENSE"], "review", 0)  # too few digits to be an ID
     assert pii.plausible("D1234567", ["DRIVERS_LICENSE"], 'licence = "D1234567"', 11)
+
+
+def test_real_ids_next_to_colons_or_emails_are_still_reported():
+    for line, value in (("ssn:472-81-0094", "472-81-0094"), ("acct:12345678", "12345678"),
+                        ("ssn: 472-81-0094", "472-81-0094"), ("card 4111 1111 1111 1111", "4111 1111 1111 1111"),
+                        ("see https://example.org then acct 12345678", "12345678")):
+        assert pii.plausible(value, ["SSN"], line, line.index(value)), line
+    whole = "contact jane@realmail.com: 472-81-0094"  # alignment fallback: the whole line is the span
+    assert pii.plausible(whole, ["SSN"], whole, 0)

@@ -151,7 +151,7 @@ DISCLAIMER = ("Rampart is an on-device model and can be wrong; check it yourself
 
 ID_LABELS = {"SSN", "CREDIT_CARD", "BANK_ACCOUNT", "ROUTING_NUMBER", "TAX_ID", "PASSPORT", "DRIVERS_LICENSE",
              "GOVERNMENT_ID"}
-CODE_TOKEN = re.compile(r"[\w.-]*[/@:][\w./@:-]*")  # paths, URLs, owner/repo@ref, host:port, emails' neighbours
+CODE_TOKEN = re.compile(r"[\w.:-]*[/@][\w./@:-]*")  # paths, URLs, owner/repo@ref (a bare ":" is not code)
 
 
 def plausible(text: str, labels: list[str], line: str = "", start: int = 0) -> bool:
@@ -165,7 +165,7 @@ def plausible(text: str, labels: list[str], line: str = "", start: int = 0) -> b
         if sum(c.isdigit() for c in t) < 5:
             return False
         for m in CODE_TOKEN.finditer(line):
-            if m.start() <= start < m.end():
+            if m.start() <= start and start + len(text) <= m.end():  # only if the whole detection is inside
                 return False
     return True
 
