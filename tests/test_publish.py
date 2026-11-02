@@ -108,3 +108,40 @@ def test_privacy_section_counts_rampart_pii_and_keeps_other_concerns(tmp_path):
     assert "Other privacy concerns: Logs the full request body." in s
     review, _ = build(list(rs.values()), {**BUNDLE, "local_findings": local})
     assert sum("potential PII" in c["body"] for c in review["comments"]) == 1  # identical findings posted once
+
+
+def test_old_inline_comments_are_cleared_except_threads_humans_replied_to():
+    from agent_review.publish import BOT, stale
+    bot, human = {"login": BOT}, {"login": "jane-doe-reviewer"}
+    comments = [
+        {"id": 1, "pull_request_review_id": 10, "user": bot},  # old run: delete
+        {"id": 2, "pull_request_review_id": 10, "user": bot},  # old run, but a human replied: keep
+        {"id": 3, "pull_request_review_id": 99, "user": human, "in_reply_to_id": 2},
+        {"id": 4, "pull_request_review_id": 20, "user": bot},  # the new review: keep
+        {"id": 5, "pull_request_review_id": 11, "user": human},  # a human's own comment: keep
+    ]
+    assert stale(comments, {10, 11}) == [1]
+
+
+def test_post_retires_old_reviews_and_deletes_their_comments(monkeypatch):
+    from agent_review import publish
+    calls = []
+    reviews = [[{"id": 10, "body": publish.MARKER + " old", "user": {"login": publish.BOT}, "commit_id": "a"},
+                {"id": 20, "body": publish.MARKER + " new", "user": {"login": publish.BOT}, "commit_id": "b"}]]
+    comments = [[{"id": 1, "pull_request_review_id": 10, "user": {"login": publish.BOT}},
+                 {"id": 4, "pull_request_review_id": 20, "user": {"login": publish.BOT}}]]
+
+    def fake(*args, payload=None, **kw):
+        calls.append((args, payload))
+        if "--method" in args and args[args.index("--method") + 1] == "POST":
+            return json.dumps({"id": 20})
+        if args[0].endswith("/reviews") and "--paginate" in args:
+            return json.dumps(reviews)
+        if args[0].endswith("/comments") and "--paginate" in args:
+            return json.dumps(comments)
+        return "{}"
+    monkeypatch.setattr(publish, "gh", fake)
+    publish.post("o/r", 7, {"commit_id": "b" * 40, "body": "x", "comments": [], "event": "COMMENT"})
+    deleted = [a[0] for a, _ in calls if "DELETE" in a]
+    edited = [a[0] for a, _ in calls if "PUT" in a]
+    assert deleted == ["repos/o/r/pulls/comments/1"] and edited == ["repos/o/r/pulls/7/reviews/10"]

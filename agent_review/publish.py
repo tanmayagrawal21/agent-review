@@ -155,20 +155,44 @@ def gh(*args: str, payload: dict | None = None, waits: tuple[int, ...] = (60, 12
     raise AssertionError("unreachable")
 
 
+BOT = "github-actions[bot]"
+
+
+def stale(comments: list[dict], old_reviews: set[int]) -> list[int]:
+    """Inline comments the bot left in earlier agent reviews, except threads a human has replied to."""
+    replied = {c.get("in_reply_to_id") for c in comments if (c.get("user") or {}).get("login") != BOT}
+    return [c["id"] for c in comments
+            if c.get("pull_request_review_id") in old_reviews and (c.get("user") or {}).get("login") == BOT
+            and not c.get("in_reply_to_id") and c["id"] not in replied]
+
+
 def post(repo: str, pr: int, review: dict) -> None:
+    """Post the review, then retire earlier agent reviews: their summary becomes 'superseded' and their inline
+    comments are deleted, so the PR only shows the latest findings."""
     base = f"repos/{repo}/pulls/{pr}/reviews"
-    old = [rv for page in json.loads(gh(base, "--paginate", "--slurp") or "[]") for rv in page
-           if MARKER in (rv.get("body") or "") and (rv.get("user") or {}).get("login") == "github-actions[bot]"
-           and rv.get("commit_id") != review["commit_id"]]
     try:
-        gh(base, "--method", "POST", payload=review)
+        new = json.loads(gh(base, "--method", "POST", payload=review) or "{}")
     except RuntimeError as e:  # a line GitHub will not anchor (422): put everything in the body
         if any(t in str(e).lower() for t in THROTTLED):
             raise
         extra = "\n".join(f"- `{c['path']}:{c['line']}` {c['body']}" for c in review["comments"])
         body = (review["body"] + "\n\n### Inline findings\n" + extra)[:MAX_BODY]
-        gh(base, "--method", "POST", payload={**review, "comments": [], "body": body})
-    for rv in old:  # best effort: only the latest review reads as current
+        new = json.loads(gh(base, "--method", "POST", payload={**review, "comments": [], "body": body}) or "{}")
+    if not new.get("id"):  # cannot tell the new review from old ones: leave everything in place
+        return
+    old = [rv for page in json.loads(gh(base, "--paginate", "--slurp") or "[]") for rv in page
+           if MARKER in (rv.get("body") or "") and (rv.get("user") or {}).get("login") == BOT
+           and rv.get("id") != new.get("id")]
+    comments = [c for page in json.loads(gh(f"repos/{repo}/pulls/{pr}/comments", "--paginate", "--slurp") or "[]")
+                for c in page]
+    for cid in stale(comments, {rv["id"] for rv in old}):  # best effort
+        try:
+            gh(f"repos/{repo}/pulls/comments/{cid}", "--method", "DELETE")
+        except RuntimeError:
+            pass
+    for rv in old:
+        if "Superseded by" in (rv.get("body") or ""):
+            continue
         try:
             gh(f"{base}/{rv['id']}", "--method", "PUT",
                payload={"body": f"{MARKER}\nSuperseded by the agent review of `{review['commit_id'][:7]}`."})

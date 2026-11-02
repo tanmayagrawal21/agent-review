@@ -18,3 +18,12 @@ Other concerns are "suggestion". If the PR touches no control, approve with no f
 summary. Verdict "changes" if anything is blocking.
 For every finding with a line, also copy that line's exact text from the head version into "code" (for a
 secret, copy only the code around it and replace the value with "…"). It is used to place the comment.
+
+Keep the review short and precise:
+- Report at most 5 findings, most important first. Report each issue once, at its most relevant line, even if
+  it appears in several places (say "also at ..." in the message).
+- "blocking" only for a concrete defect this PR introduces or makes worse than the base branch. Deliberate,
+  documented settings that already exist (advisory mode, feature flags, opt-outs) and known platform limits (for
+  example, fork PRs get no secrets) are never blocking. A PR that adds or loosens such a setting is reviewed as
+  usual.
+- No praise, no restating the diff, no speculative "consider" items without a concrete reason.

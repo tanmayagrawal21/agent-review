@@ -136,7 +136,7 @@ def process(items: list[tuple[str, str]], run=run_model) -> tuple[list[str], lis
             else:
                 groups.append([a, b, [lb]])
         kept = [(a, b, lbs) for a, b, lbs in groups if reportable(items[i][0], original[i], x + a, x + b)
-                and not FICTIONAL.fullmatch(orig[a:b].strip()) and plausible(orig[a:b], lbs)]
+                and not FICTIONAL.fullmatch(orig[a:b].strip()) and plausible(orig[a:b], lbs, original[i], x + a)]
         found[i]["labels"] += [lb for _, _, lbs in kept for lb in lbs]
         found[i]["spans"] += [(x + a, x + b, lbs) for a, b, lbs in kept]
         found[i]["line"] = original[i]  # secrets already masked as [SECRET]; personal data is not
@@ -149,11 +149,22 @@ DISCLAIMER = ("Rampart is an on-device model and can be wrong; check it yourself
               "with an obviously fictional value (Jane Doe, jane@example.com, 555-0100).")
 
 
-def plausible(text: str, labels: list[str]) -> bool:
-    """A name detection is reported only if it is shaped like a name (capitalised words). Other labels pass."""
-    if not set(labels) <= {"GIVEN_NAME", "SURNAME"}:
-        return True
-    return bool(NAMEISH.fullmatch(text.strip()))
+ID_LABELS = {"SSN", "CREDIT_CARD", "BANK_ACCOUNT", "ROUTING_NUMBER", "TAX_ID", "PASSPORT", "DRIVERS_LICENSE",
+             "GOVERNMENT_ID"}
+def plausible(text: str, labels: list[str], line: str = "", start: int = 0) -> bool:
+    """Whether a detection is worth reporting (it is redacted either way). Names must be name-shaped
+    (capitalised words). ID-type detections must look like an ID (at least 5 digits) and not be a path segment
+    or an `@ref` (directly after "/" or "@"), which the model often mistakes for licences or account numbers."""
+    t = text.strip()
+    if set(labels) <= {"GIVEN_NAME", "SURNAME"}:
+        return bool(NAMEISH.fullmatch(t))
+    if set(labels) & ID_LABELS and not set(labels) - ID_LABELS:
+        if sum(c.isdigit() for c in t) < 5:
+            return False
+        token = not any(c.isspace() for c in t)  # one token: a ref or path segment, never a multi-word span
+        if token and (set(t) & set("/@") or (start > 0 and line[start - 1] in "/@")):
+            return False
+    return True
 
 
 def highlight(line: str, spans: list[tuple[int, int, list[str]]]) -> str:
